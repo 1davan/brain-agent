@@ -469,6 +469,48 @@ class Pipeline:
                     return {"success": success, "error": None if success else "Failed to delete"}
                 return {"success": False, "error": "Event ID required"}
 
+            elif action_name == "update_event":
+                from dateutil import parser as date_parser
+
+                event_id = params.get("event_id")
+                find_by = params.get("find_by")
+
+                # If no event_id, try to find by title
+                if not event_id and find_by:
+                    events = await self.calendar_service.get_upcoming_events(max_results=20, days_ahead=7)
+                    for event in events:
+                        if find_by.lower() in event.get("title", "").lower():
+                            event_id = event.get("id")
+                            break
+
+                if not event_id:
+                    return {"success": False, "error": f"Could not find event matching '{find_by}'"}
+
+                changes = params.get("changes", {})
+                update_data = {}
+
+                if "summary" in changes:
+                    update_data["summary"] = changes["summary"]
+                if "start_time" in changes:
+                    update_data["start"] = {
+                        "dateTime": date_parser.parse(changes["start_time"]).isoformat(),
+                        "timeZone": "Australia/Brisbane"
+                    }
+                if "end_time" in changes:
+                    update_data["end"] = {
+                        "dateTime": date_parser.parse(changes["end_time"]).isoformat(),
+                        "timeZone": "Australia/Brisbane"
+                    }
+                if "location" in changes:
+                    update_data["location"] = changes["location"]
+
+                if update_data:
+                    result = await self.calendar_service.update_event(event_id, update_data)
+                    if result:
+                        return {"success": True, "data": {"event_id": event_id}}
+                    return {"success": False, "error": "Failed to update event"}
+                return {"success": False, "error": "No changes specified"}
+
             else:
                 return {"success": False, "error": f"Unknown calendar action: {action_name}"}
 

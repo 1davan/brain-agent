@@ -87,7 +87,14 @@ CALENDAR ACTIONS:
 - create_event: {{summary, start_time (ISO format), end_time, location}}
 - list_events: {{days_ahead}}
 - delete_event: {{event_id or find_by}} [REQUIRES CONFIRMATION]
-- update_event: {{event_id or find_by, changes}} [REQUIRES CONFIRMATION]
+- update_event: {{event_id or find_by, changes: {{start_time, end_time, summary}}}} [REQUIRES CONFIRMATION]
+
+CALENDAR RULES:
+- When user describes multiple activities, create SEPARATE events for each
+- Use descriptive summaries (not "Blocked for events")
+- Default work day starts at 8:00 AM if not specified
+- "Break" or "break at X" = 30min break starting at that time
+- Always calculate end_time (default 1 hour if not specified)
 
 EMAIL ACTIONS:
 - create_draft: {{to (name or email), subject, body}}
