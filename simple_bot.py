@@ -78,7 +78,7 @@ class SimpleTelegramBot:
             print("      SUCCESS: AI service initialized")
 
             print("[3/5] Initializing Vector Processor...")
-            self.vector_processor = VectorProcessor()
+            self.vector_processor = VectorProcessor(model_name=self.config.embedding_model)
             print("      SUCCESS: Vector processor ready")
 
             print("[4/5] Initializing Memory Agent...")
