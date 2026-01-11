@@ -205,60 +205,159 @@ brain_agent/
 
 ## Deployment
 
-### DigitalOcean Droplet
+### DigitalOcean Droplet (Production)
 
-The bot is designed to run on a minimal $6/month droplet (1GB RAM, 25GB disk).
+**Server:** 170.64.142.252 (Sydney)
+**SSH:** `ssh -i ~/.ssh/sadhuastro_key root@170.64.142.252`
 
-**Server Setup:**
+---
+
+### CRITICAL: DEPLOYMENT RULES
+
+**NEVER do any of these:**
+- NEVER use DigitalOcean API actions like `power_cycle`, `rebuild`, `restore`
+- NEVER restart the droplet unless absolutely necessary
+- NEVER run destructive commands on the server
+- NEVER guess at solutions - ask for help instead
+
+**ALWAYS do these for updates:**
 ```bash
-# SSH into your droplet
-ssh deploy@your-droplet-ip
-
-# Clone the repository
-git clone https://github.com/your-username/brain-agent.git
-cd brain-agent
-
-# Create .env file with your secrets
-nano .env
-
-# Copy credentials.json
-# (upload via scp or paste contents)
-
-# Build and run
-docker compose up -d --build
+# The ONLY commands needed to deploy updates:
+ssh -i ~/.ssh/sadhuastro_key root@170.64.142.252 \
+  "cd /root/brain_agent && git pull && systemctl restart brain-agent"
 ```
 
-**Management Commands:**
-```bash
-# View logs
-docker compose logs -f
+That's it. Nothing else. No rebuilding, no reinstalling, no Docker.
 
-# Restart the bot
-docker compose restart
+---
 
-# Update after pushing changes
-git pull && docker compose up -d --build
+### Current Server Configuration
 
-# Check container status
-docker ps
+The bot runs as a **systemd service** (NOT Docker) for simplicity:
+
+```
+Service: brain-agent.service
+Working Dir: /root/brain_agent
+Python: /usr/bin/python3 (system Python 3.10)
+Swap: 2GB (required for embedding model)
 ```
 
-**Security Features (Built-in):**
-- Container runs as non-root user
-- Read-only filesystem with tmpfs for cache
-- No exposed ports (uses Telegram polling)
-- Resource limits to prevent OOM
-- Automatic restarts on failure
+**Service commands:**
+```bash
+systemctl status brain-agent    # Check status
+systemctl restart brain-agent   # Restart bot
+systemctl stop brain-agent      # Stop bot
+journalctl -u brain-agent -f    # View live logs
+journalctl -u brain-agent -n 100  # Last 100 log lines
+```
+
+---
+
+### Security Configuration
+
+**Open ports (verified secure):**
+- Port 22 (SSH) - key-based auth only, no password
+- No other ports exposed
+- Bot uses outbound HTTPS polling (no inbound connections needed)
+
+**Firewall (UFW):**
+```bash
+ufw status                # Check firewall
+ufw allow 22/tcp          # Allow SSH only
+ufw enable                # Enable firewall
+```
+
+---
+
+### Initial Server Setup (ONE TIME ONLY)
+
+This was already done. Only repeat if server is destroyed:
+
+```bash
+# 1. Install Python and pip
+apt-get update && apt-get install -y python3-pip python3-venv
+
+# 2. Upgrade pip (prevents resolver bugs)
+pip3 install --upgrade pip
+
+# 3. Clone repository
+git clone https://github.com/1davan/brain-agent.git /root/brain_agent
+
+# 4. Upload .env and credentials
+scp .env root@170.64.142.252:/root/brain_agent/
+scp n8n-modia-health-11e011607797.json root@170.64.142.252:/root/brain_agent/
+
+# 5. Install dependencies
+cd /root/brain_agent && pip3 install -r requirements.txt
+
+# 6. Add swap (prevents OOM when loading embedding model)
+fallocate -l 2G /swapfile
+chmod 600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+echo '/swapfile swap swap defaults 0 0' >> /etc/fstab
+
+# 7. Create systemd service
+cat > /etc/systemd/system/brain-agent.service << 'EOF'
+[Unit]
+Description=Brain Agent Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/brain_agent
+ExecStart=/usr/bin/python3 /root/brain_agent/simple_bot.py
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 8. Enable and start
+systemctl daemon-reload
+systemctl enable brain-agent
+systemctl start brain-agent
+```
+
+---
+
+### Troubleshooting
+
+**Bot not responding after deploy:**
+```bash
+journalctl -u brain-agent -n 50  # Check for errors
+systemctl restart brain-agent    # Try restart
+```
+
+**OOM killed (out of memory):**
+```bash
+free -h                          # Check swap is enabled
+swapon --show                    # Verify swap active
+```
+
+**SSH permission denied:**
+- Use the correct key: `-i ~/.ssh/sadhuastro_key`
+- Do NOT use id_ed25519 (not authorized on this server)
+
+**Need to add new SSH key:**
+```bash
+# From existing SSH session:
+echo "ssh-ed25519 AAAA... user@host" >> /root/.ssh/authorized_keys
+```
+
+---
 
 ### Resource Requirements
 
-| Resource | Minimum | Recommended |
-|----------|---------|-------------|
-| RAM | 512MB | 1GB |
-| Disk | 10GB | 25GB |
-| CPU | 1 vCPU | 1 vCPU |
-
-The Docker image uses CPU-only PyTorch (~800MB) instead of CUDA version (~7GB) to fit on small droplets.
+| Resource | Current | Notes |
+|----------|---------|-------|
+| RAM | 1GB + 2GB swap | Swap required for embedding model |
+| Disk | 25GB | ~8GB used |
+| CPU | 1 vCPU | Sufficient |
+| Cost | $6/month | s-1vcpu-1gb droplet |
 
 ## Troubleshooting
 
