@@ -64,11 +64,13 @@ class EmailService:
                     contacts_df = await self.sheets_client.get_sheet_data("Contacts")
                     if contacts_df.empty:
                         return
+                    # Make column names lowercase for case-insensitive lookup
+                    contacts_df.columns = contacts_df.columns.str.lower()
                     for _, row in contacts_df.iterrows():
-                        name = str(row.get('name', '')).lower()
-                        email = str(row.get('email', ''))
-                        if name and email:
-                            self.contacts[name] = email
+                        name = str(row.get('name', '')).strip().lower()
+                        email_addr = str(row.get('email', '')).strip()
+                        if name and email_addr and '@' in email_addr:
+                            self.contacts[name] = email_addr
                     print(f"Loaded {len(self.contacts)} contacts from storage")
                 except Exception as e:
                     # Contacts sheet might not exist yet
@@ -134,9 +136,12 @@ class EmailService:
 
         resolved = self.get_contact_email(to)
         if resolved:
+            print(f"Resolved contact '{to}' -> {resolved}")
             return resolved
 
-        print(f"Unknown contact: {to}")
+        # Debug: show what contacts we have
+        print(f"Unknown contact: '{to}' (lowercase: '{to.lower()}')")
+        print(f"Available contacts: {list(self.contacts.keys())}")
         return None
 
     async def create_draft(
