@@ -729,8 +729,16 @@ class SimpleTelegramBot:
             import tempfile
             import os
 
-            # Groq expects a file, so save temporarily
-            suffix = '.ogg' if filename.endswith('.oga') or filename.endswith('.ogg') else '.mp3'
+            # Telegram voice messages are .oga (Ogg with Opus codec)
+            # Groq accepts: flac mp3 mp4 mpeg mpga m4a ogg opus wav webm
+            # .oga files are Ogg format, so use .ogg extension
+            if filename.endswith('.oga') or filename.endswith('.ogg'):
+                suffix = '.ogg'
+                groq_filename = 'voice.ogg'  # Groq checks filename extension
+            else:
+                suffix = '.mp3'
+                groq_filename = 'audio.mp3'
+
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as f:
                 f.write(audio_data)
                 temp_path = f.name
@@ -742,7 +750,7 @@ class SimpleTelegramBot:
 
                 with open(temp_path, 'rb') as audio_file:
                     transcription = client.audio.transcriptions.create(
-                        file=(filename, audio_file),
+                        file=(groq_filename, audio_file),  # Use valid extension for Groq
                         model="whisper-large-v3",
                         response_format="text"
                     )
