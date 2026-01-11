@@ -50,6 +50,12 @@ class SimpleTelegramBot:
         # Daily summary hour (default: 9am)
         self.daily_summary_hour = int(os.getenv('DAILY_SUMMARY_HOUR', '9'))
 
+        # Calendar event filters (events to skip in summaries)
+        # user_id -> set of event title substrings to skip
+        self.skipped_calendar_events = {}
+        # Pending skip suggestions awaiting confirmation
+        self.pending_skip_suggestions = {}  # user_id -> list of suggested event titles
+
         # Task discussion sessions (for 5-min timeout)
         self.task_discussion_sessions = {}  # user_id -> {'task_id': str, 'started_at': datetime}
 
@@ -322,12 +328,15 @@ class SimpleTelegramBot:
                     tasks = await self.task_agent.get_prioritized_tasks(user_id, limit=10, status='pending')
                     calendar_events = []
                     if hasattr(self, 'calendar_service') and self.calendar_service:
-                        calendar_events = await self.calendar_service.get_upcoming_events(max_results=5, days_ahead=1)
+                        calendar_events = await self.calendar_service.get_upcoming_events(max_results=10, days_ahead=1)
                     return tasks, calendar_events
 
                 tasks, events = loop.run_until_complete(get_data())
             finally:
                 loop.close()
+
+            # Filter out skipped events
+            events = self._filter_skipped_events(user_id, events)
 
             now = datetime.now(BRISBANE_TZ)
             lines = [
@@ -465,6 +474,10 @@ class SimpleTelegramBot:
                     # Special handling for dashboard command
                     self.send_or_update_dashboard(user_id, chat_id)
                     return
+                elif response == "__SKIP_SUGGEST__":
+                    # Special handling for skip suggestion flow
+                    self._suggest_calendar_skips(user_id, chat_id)
+                    return
                 elif response:
                     self.send_message(chat_id, response)
                     return
@@ -571,6 +584,24 @@ class SimpleTelegramBot:
                 # Acknowledge reminder (dismiss)
                 self.edit_message(chat_id, message_id, "Got it, acknowledged.")
 
+            elif action == 'skip_event':
+                # Skip a calendar event from suggestions
+                event_title = ':'.join(parts[1:]) if len(parts) > 1 else ''
+                self._handle_skip_event(user_id, chat_id, message_id, event_title, skip=True)
+
+            elif action == 'keep_event':
+                # Keep (don't skip) a calendar event
+                event_title = ':'.join(parts[1:]) if len(parts) > 1 else ''
+                self._handle_skip_event(user_id, chat_id, message_id, event_title, skip=False)
+
+            elif action == 'skip_all_suggested':
+                # Skip all suggested recurring events
+                self._handle_skip_all_suggested(user_id, chat_id, message_id)
+
+            elif action == 'keep_all_suggested':
+                # Keep all suggested recurring events (cancel suggestion)
+                self._handle_keep_all_suggested(user_id, chat_id, message_id)
+
         except Exception as e:
             print(f"Error handling callback query: {e}")
             import traceback
@@ -647,6 +678,149 @@ class SimpleTelegramBot:
         """Snooze a reminder"""
         self.edit_message(chat_id, message_id, f"Snoozed for {minutes} minutes. I'll remind you again.")
         # TODO: Implement actual snooze logic with scheduler
+
+    def _suggest_calendar_skips(self, user_id, chat_id):
+        """Suggest recurring calendar events to skip in summaries"""
+        try:
+            # Get upcoming events (next 7 days)
+            events = self._get_upcoming_events_sync(days=7)
+            if not events:
+                self.send_message(chat_id, "No upcoming calendar events found to analyze.")
+                return
+
+            # Detect recurring events by finding duplicates (same title appears multiple times)
+            # or events with recurrence indicators
+            title_counts = {}
+            for event in events:
+                title = event.get('summary', 'Untitled')
+                title_counts[title] = title_counts.get(title, 0) + 1
+
+            # Find likely recurring events (appear 2+ times or have recurring flag)
+            recurring_events = []
+            seen_titles = set()
+            for event in events:
+                title = event.get('summary', 'Untitled')
+                is_recurring = event.get('recurringEventId') is not None
+                appears_multiple = title_counts.get(title, 0) >= 2
+
+                # Skip if already in user's skip list
+                user_skips = self.skipped_calendar_events.get(user_id, set())
+                already_skipped = any(skip.lower() in title.lower() for skip in user_skips)
+
+                if (is_recurring or appears_multiple) and title not in seen_titles and not already_skipped:
+                    recurring_events.append(title)
+                    seen_titles.add(title)
+
+            if not recurring_events:
+                self.send_message(chat_id, "No recurring events found to suggest skipping. All recurring events are either already skipped or none were detected.")
+                return
+
+            # Store suggestions for this user
+            self.pending_skip_suggestions[user_id] = recurring_events[:5]  # Limit to 5 suggestions
+
+            # Build message with inline buttons for each event
+            message = "RECURRING EVENTS DETECTED:\n\nThese events repeat regularly. Skip them in daily summaries?\n\n"
+            buttons = []
+
+            for title in recurring_events[:5]:
+                message += f"- {title}\n"
+                # Truncate title for callback data (max 64 bytes)
+                short_title = title[:40] if len(title) > 40 else title
+                buttons.append([
+                    {'text': f'Skip: {short_title[:20]}...', 'callback_data': f'skip_event:{short_title}'},
+                    {'text': 'Keep', 'callback_data': f'keep_event:{short_title}'}
+                ])
+
+            # Add "Skip All" and "Keep All" buttons
+            buttons.append([
+                {'text': 'Skip All Listed', 'callback_data': 'skip_all_suggested'},
+                {'text': 'Keep All', 'callback_data': 'keep_all_suggested'}
+            ])
+
+            reply_markup = {'inline_keyboard': buttons}
+            self.send_message(chat_id, message, reply_markup=reply_markup)
+
+        except Exception as e:
+            print(f"Error suggesting calendar skips: {e}")
+            import traceback
+            traceback.print_exc()
+            self.send_message(chat_id, f"Error analyzing calendar: {e}")
+
+    def _handle_skip_event(self, user_id, chat_id, message_id, event_title, skip=True):
+        """Handle skipping or keeping a single event"""
+        if skip:
+            if user_id not in self.skipped_calendar_events:
+                self.skipped_calendar_events[user_id] = set()
+            self.skipped_calendar_events[user_id].add(event_title)
+            self.answer_callback_query(None, f"Will skip '{event_title[:30]}...'")
+
+            # Remove from pending if present
+            if user_id in self.pending_skip_suggestions:
+                self.pending_skip_suggestions[user_id] = [
+                    t for t in self.pending_skip_suggestions[user_id]
+                    if not (event_title.lower() in t.lower() or t.lower() in event_title.lower())
+                ]
+        else:
+            # User chose to keep - just remove from pending
+            if user_id in self.pending_skip_suggestions:
+                self.pending_skip_suggestions[user_id] = [
+                    t for t in self.pending_skip_suggestions[user_id]
+                    if not (event_title.lower() in t.lower() or t.lower() in event_title.lower())
+                ]
+
+        # Update message to show current status
+        skipped = self.skipped_calendar_events.get(user_id, set())
+        if skipped:
+            status = "SKIPPED EVENTS:\n" + "\n".join([f"- {s}" for s in skipped])
+        else:
+            status = "No events are currently being skipped."
+
+        self.edit_message(chat_id, message_id, f"{'Skipped' if skip else 'Keeping'}: {event_title}\n\n{status}")
+
+    def _handle_skip_all_suggested(self, user_id, chat_id, message_id):
+        """Skip all suggested recurring events"""
+        suggestions = self.pending_skip_suggestions.get(user_id, [])
+        if not suggestions:
+            self.edit_message(chat_id, message_id, "No suggestions to skip.")
+            return
+
+        if user_id not in self.skipped_calendar_events:
+            self.skipped_calendar_events[user_id] = set()
+
+        for title in suggestions:
+            self.skipped_calendar_events[user_id].add(title)
+
+        # Clear pending
+        del self.pending_skip_suggestions[user_id]
+
+        skipped_list = "\n".join([f"- {s}" for s in self.skipped_calendar_events[user_id]])
+        self.edit_message(chat_id, message_id, f"All suggested events will be skipped in summaries.\n\nSKIPPED EVENTS:\n{skipped_list}\n\nUse '/settings unskip \"Event Name\"' to show them again.")
+
+    def _handle_keep_all_suggested(self, user_id, chat_id, message_id):
+        """Cancel skip suggestions - keep all events"""
+        if user_id in self.pending_skip_suggestions:
+            del self.pending_skip_suggestions[user_id]
+
+        self.edit_message(chat_id, message_id, "Keeping all events in summaries. No changes made.")
+
+    def _filter_skipped_events(self, user_id, events):
+        """Filter out skipped events from a list of calendar events"""
+        if not events:
+            return events
+
+        user_skips = self.skipped_calendar_events.get(user_id, set())
+        if not user_skips:
+            return events
+
+        filtered = []
+        for event in events:
+            title = event.get('summary', '') or event.get('title', '')
+            # Check if any skip pattern matches (case-insensitive substring match)
+            should_skip = any(skip.lower() in title.lower() for skip in user_skips)
+            if not should_skip:
+                filtered.append(event)
+
+        return filtered
 
     def _handle_voice_message(self, message):
         """Handle voice messages - transcribe with Whisper and process"""
@@ -970,22 +1144,25 @@ Ready to assist you!"""
                 # Show current settings
                 user_hours = self.user_checkin_hours.get(user_id, self.default_checkin_hours)
                 hours_str = ', '.join([f"{h}:00" for h in user_hours])
+                skipped = self.skipped_calendar_events.get(user_id, set())
+                skipped_str = ', '.join(skipped) if skipped else 'None'
                 return f"""SETTINGS
 
 CHECK-IN TIMES:
 Currently: {hours_str}
 
-To change, use:
-/settings checkin 9,13,17
-(comma-separated hours in 24h format)
-
 DAILY SUMMARY:
-Currently: {self.daily_summary_hour}:00 AM
+Time: {self.daily_summary_hour}:00 AM
 
-Examples:
-- /settings checkin 8,12,18 (8am, 12pm, 6pm)
-- /settings checkin off (disable check-ins)
-- /settings checkin default (reset to default)"""
+SKIPPED CALENDAR EVENTS:
+{skipped_str}
+
+COMMANDS:
+- /settings checkin 8,12,18 - set check-in hours
+- /settings checkin off - disable check-ins
+- /settings skip "Team Standup" - skip event in summaries
+- /settings unskip "Team Standup" - show event again
+- /settings skip suggest - suggest recurring events to skip"""
 
             elif len(parts) >= 3 and parts[1].lower() == 'checkin':
                 setting = parts[2].lower()
@@ -1008,6 +1185,31 @@ Examples:
                             return "Invalid hours. Use 0-23 (24-hour format)."
                     except ValueError:
                         return "Invalid format. Use comma-separated hours, e.g., /settings checkin 9,14,18"
+
+            elif len(parts) >= 2 and parts[1].lower() == 'skip':
+                if len(parts) == 2:
+                    return "Usage: /settings skip \"Event Name\" or /settings skip suggest"
+
+                setting = ' '.join(parts[2:]).strip('"\'')
+
+                if setting.lower() == 'suggest':
+                    # Trigger suggestion flow - return special marker
+                    return "__SKIP_SUGGEST__"
+                else:
+                    # Add to skip list
+                    if user_id not in self.skipped_calendar_events:
+                        self.skipped_calendar_events[user_id] = set()
+                    self.skipped_calendar_events[user_id].add(setting)
+                    return f"Will skip '{setting}' in daily summaries.\n\nUse '/settings unskip \"{setting}\"' to show it again."
+
+            elif len(parts) >= 3 and parts[1].lower() == 'unskip':
+                event_name = ' '.join(parts[2:]).strip('"\'')
+                if user_id in self.skipped_calendar_events:
+                    self.skipped_calendar_events[user_id].discard(event_name)
+                    if not self.skipped_calendar_events[user_id]:
+                        del self.skipped_calendar_events[user_id]
+                return f"'{event_name}' will now appear in summaries again."
+
             else:
                 return "Unknown setting. Try /settings to see available options."
 
@@ -1225,8 +1427,8 @@ Examples:
                 if now.hour == self.daily_summary_hour and now.minute < 5:
                     self._send_daily_summaries()
 
-                # Proactive task check-ins at configurable hours
-                if now.hour in self.default_checkin_hours and now.minute < 5:
+                # Proactive task check-ins (checked per-user inside the method)
+                if now.minute < 5:
                     self._send_task_checkins()
 
                 # Check for upcoming deadlines
@@ -1260,8 +1462,9 @@ Examples:
                 pending = [t for t in tasks if t.get('status') == 'pending'] if tasks else []
                 high_priority = [t for t in pending if t.get('priority') == 'high']
 
-                # Get today's calendar events
+                # Get today's calendar events (and filter out skipped ones)
                 todays_events = self._get_todays_events_sync()
+                todays_events = self._filter_skipped_events(user_id, todays_events)
 
                 # Only send if there's something to report
                 if not pending and not todays_events:
@@ -1336,6 +1539,13 @@ Examples:
 
         for user_id, chat_id in self.known_users:
             try:
+                # Get user's configured check-in hours (or default)
+                user_hours = self.user_checkin_hours.get(user_id, self.default_checkin_hours)
+
+                # Skip if current hour is not in user's check-in schedule
+                if current_hour not in user_hours:
+                    continue
+
                 # Check if we already sent a check-in at this hour today
                 last_checkin = self.last_task_checkin.get(user_id)
                 if last_checkin:
