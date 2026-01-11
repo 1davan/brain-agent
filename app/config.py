@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     max_memory_items: int = 100  # Max memory items per user
 
     # Agent Configuration
-    embedding_model: str = "all-mpnet-base-v2"  # Better embedding model for RAG (768 dimensions, superior performance)
+    embedding_model: str = "all-MiniLM-L6-v2"  # Lightweight model for low-memory environments (384 dims, ~90MB)
     groq_model: str = "llama-3.3-70b-versatile"  # Groq model for reasoning (upgraded)
 
     # Timezone Configuration

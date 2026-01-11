@@ -14,15 +14,15 @@ services:
       - ALL
     read_only: true
 
-    # Resource limits (1GB droplet)
+    # Resource limits (1GB droplet - allow using most of it)
     deploy:
       resources:
         limits:
           cpus: '0.9'
-          memory: 900M
+          memory: 950M
         reservations:
-          cpus: '0.25'
-          memory: 256M
+          cpus: '0.1'
+          memory: 128M
 
     # Tmpfs for writable directories needed by Python
     tmpfs:
