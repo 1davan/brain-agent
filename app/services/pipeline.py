@@ -131,16 +131,29 @@ class Pipeline:
 
         # Early exit: Simple chat needs no context or actions
         if route_result["type"] == "chat" and not route_result["domains"]:
-            context_task.cancel()
-            try:
-                await context_task
-            except asyncio.CancelledError:
-                pass
+            # Check if message references memories/personal info - if so, fetch context
+            msg_lower = user_message.lower()
+            needs_memory_context = any(kw in msg_lower for kw in [
+                'memories', 'remember', 'know about me', 'my life', 'told you',
+                'you know', 'what do you', 'about me', 'my preferences'
+            ])
+
+            if needs_memory_context:
+                # Wait for context since we need memories
+                context = await context_task
+                print(f"[Pipeline] Chat with memory context: {len(context.get('memories', []))} memories")
+            else:
+                context_task.cancel()
+                try:
+                    await context_task
+                except asyncio.CancelledError:
+                    pass
+                context = {"memories": []}
 
             # Generate chat response
             response = await self.responder.generate_chat_response(
                 user_message,
-                {"memories": []},  # Minimal context for chat
+                context,
                 conversation_history
             )
             return {

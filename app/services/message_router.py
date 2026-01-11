@@ -40,7 +40,9 @@ RULES:
 - Short responses ("yes", "ok", "that one", "the first", numbers, single words) after a bot question = followup
 - "Thanks!" alone = chat. "Thanks, and remind me..." = action
 - Questions about schedule/availability = calendar
-- "Remember that..." or sharing personal info = memory
+- "Remember that..." or sharing personal info = memory (storing)
+- Questions ABOUT memories ("what do you know about me", "according to my memories") = chat (not memory action)
+- Reflective questions about the user's life/preferences = chat
 - If unsure, default to chat
 
 Output ONLY this JSON:
