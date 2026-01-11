@@ -229,6 +229,12 @@ When user says "remind me", "add a task", "I need to", or describes something to
 - UPDATE: {{"action": "update", "find_by": "task title keywords", "data": {{"status": "complete"}}}}
 - COMPLETE: {{"action": "complete", "find_by": "task title keywords"}}
 
+IMPORTANT - TIMED REMINDERS: When user says "remind me at [TIME]" or specifies a time:
+- You MUST create BOTH a task AND a calendar event
+- Add to task_actions: {{"action": "create", "data": {{"title": "...", "deadline": "TIME"}}}}
+- ALSO add to calendar_actions: {{"action": "create_event", "summary": "...", "start_time": "TIME", "end_time": null}}
+- Do NOT claim you created a calendar event unless you actually include it in calendar_actions
+
 IMPORTANT: Use ISO format for deadlines (YYYY-MM-DDTHH:MM:SS). Today is {current_date}.
 - "this evening at 6" = today at 18:00
 - "tomorrow" = next day
