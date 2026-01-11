@@ -44,11 +44,11 @@ RULES:
 - If unsure, default to chat
 
 Output ONLY this JSON:
-{
+{{
   "type": "chat|action|followup",
   "domains": [],
   "is_followup": false
-}"""
+}}"""
 
     def __init__(self, groq_api_key: str, model: str = "llama-3.3-70b-versatile"):
         self.client = Groq(api_key=groq_api_key)

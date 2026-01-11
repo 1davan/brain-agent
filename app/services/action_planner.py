@@ -398,7 +398,7 @@ class ConfirmationManager:
         """Check if message is an affirmative response."""
         affirmatives = [
             'yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay',
-            'do it', 'send it', 'go ahead', 'confirm', 'approved',
+            'do it', 'send it', 'send', 'go ahead', 'confirm', 'approved',
             'absolutely', 'definitely', 'please do', 'proceed'
         ]
         msg_lower = message.lower().strip()

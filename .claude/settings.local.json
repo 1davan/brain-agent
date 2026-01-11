@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(gh repo create:*)",
+      "Bash(doctl compute ssh-key:*)",
+      "Bash(doctl compute droplet list:*)",
+      "Bash(doctl compute droplet create:*)",
+      "Bash(doctl compute firewall create:*)",
+      "Bash(ssh:*)",
+      "Bash(doctl compute firewall list:*)",
+      "Bash(doctl compute firewall update:*)",
+      "Bash(doctl compute firewall delete:*)",
+      "Bash(doctl compute firewall get:*)",
+      "Bash(gh repo edit:*)",
+      "Bash(doctl compute droplet-action power-cycle:*)",
+      "Bash(timeout 30 bash:*)",
+      "Bash(git push:*)",
+      "Bash(doctl compute ssh brain-agent --ssh-command \"cd /opt/brain-agent && git pull && grep -q USE_PIPELINE .env || echo ''USE_PIPELINE=true'' >> .env && docker-compose down && docker-compose up -d --build\")",
+      "Bash(doctl compute droplet get:*)",
+      "Bash(doctl compute ssh:*)",
+      "Bash(doctl compute droplet delete:*)",
+      "Bash(DROPLET_IP=170.64.142.252:*)",
+      "Bash(scp:*)"
+    ]
+  }
+}

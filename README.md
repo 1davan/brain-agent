@@ -4,12 +4,18 @@ An intelligent AI chatbot with human-like memory and task management capabilitie
 
 ## Quick Start
 
+**Local Development:**
 ```bash
 cd brain_agent
 uv run python simple_bot.py
 ```
 
-That's it. The bot will start and connect to Telegram.
+**Production (Docker):**
+```bash
+docker compose up -d --build
+```
+
+The bot will start and connect to Telegram.
 
 ## Features
 
@@ -96,12 +102,25 @@ GMAIL_APP_PASSWORD=your_app_password
 
 ### 6. Install and Run
 
+**Local Development:**
 ```bash
 # Install dependencies
 uv pip install -r requirements.txt
 
 # Run the bot
 uv run python simple_bot.py
+```
+
+**Docker (Recommended for Production):**
+```bash
+# Build and run
+docker compose up -d --build
+
+# View logs
+docker compose logs -f
+
+# Stop
+docker compose down
 ```
 
 ## Usage Examples
@@ -158,9 +177,12 @@ Bot: You have 2 events tomorrow:
 
 ```
 brain_agent/
-├── simple_bot.py              # Main entry point - run this
+├── simple_bot.py              # Main entry point
+├── Dockerfile                 # Multi-stage production build
+├── docker-compose.yml         # Container orchestration
+├── .gitignore                 # Excludes secrets from git
 ├── app/
-│   ├── config.py              # Configuration
+│   ├── config.py              # Configuration (env vars)
 │   ├── database/
 │   │   ├── sheets_client.py   # Google Sheets integration
 │   │   └── local_storage.py   # Fallback storage
@@ -181,6 +203,63 @@ brain_agent/
 └── .env.example
 ```
 
+## Deployment
+
+### DigitalOcean Droplet
+
+The bot is designed to run on a minimal $6/month droplet (1GB RAM, 25GB disk).
+
+**Server Setup:**
+```bash
+# SSH into your droplet
+ssh deploy@your-droplet-ip
+
+# Clone the repository
+git clone https://github.com/your-username/brain-agent.git
+cd brain-agent
+
+# Create .env file with your secrets
+nano .env
+
+# Copy credentials.json
+# (upload via scp or paste contents)
+
+# Build and run
+docker compose up -d --build
+```
+
+**Management Commands:**
+```bash
+# View logs
+docker compose logs -f
+
+# Restart the bot
+docker compose restart
+
+# Update after pushing changes
+git pull && docker compose up -d --build
+
+# Check container status
+docker ps
+```
+
+**Security Features (Built-in):**
+- Container runs as non-root user
+- Read-only filesystem with tmpfs for cache
+- No exposed ports (uses Telegram polling)
+- Resource limits to prevent OOM
+- Automatic restarts on failure
+
+### Resource Requirements
+
+| Resource | Minimum | Recommended |
+|----------|---------|-------------|
+| RAM | 512MB | 1GB |
+| Disk | 10GB | 25GB |
+| CPU | 1 vCPU | 1 vCPU |
+
+The Docker image uses CPU-only PyTorch (~800MB) instead of CUDA version (~7GB) to fit on small droplets.
+
 ## Troubleshooting
 
 **"Google Sheets API error"**
@@ -197,6 +276,15 @@ brain_agent/
 - Check Telegram token is correct
 - Verify the bot is running (check console output)
 - Ensure network connectivity
+
+**Docker build fails with "no space left"**
+- Run `docker system prune -af` to clear old images
+- The CPU-only PyTorch build requires ~8GB free during build
+
+**Container keeps restarting**
+- Check logs: `docker compose logs`
+- Verify .env file has all required variables
+- Ensure credentials.json exists and is valid
 
 ## License
 
