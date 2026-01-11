@@ -1,0 +1,42 @@
+# Secrets - NEVER commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+*-credentials.json
+n8n-*.json
+*secret*.json
+service-account*.json
+
+# Build artifacts
+__pycache__/
+*.pyc
+*.pyo
+dist/
+build/
+*.egg-info/
+
+# Logs
+*.log
+logs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+nul
+
+# Binaries
+*.exe
+*.zip
+ngrok*
+
+# Docker
+.docker/
