@@ -137,9 +137,14 @@ class SimpleTelegramBot:
                 self.vector_processor,  # Enable semantic search for context compression
                 self.calendar_service,  # Enable calendar integration
                 self.email_service,     # Enable email drafts
-                self.keep_service       # Enable Google Keep notes
+                self.keep_service,      # Enable Google Keep notes
+                self.sheets_client      # Enable pipeline context fetching
             )
-            print("      SUCCESS: All agents initialized (semantic search enabled)")
+            # Check if pipeline is enabled
+            if self.conversation_agent.use_pipeline:
+                print("      SUCCESS: All agents initialized (MULTI-STAGE PIPELINE ENABLED)")
+            else:
+                print("      SUCCESS: All agents initialized (legacy mode)")
 
             # Load known users from persistent storage
             print("[+] Loading known users from database...")

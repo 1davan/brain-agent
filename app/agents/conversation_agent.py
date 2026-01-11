@@ -1,10 +1,19 @@
 from typing import List, Dict, Any, Optional
 import json
+import os
 from datetime import datetime
 from app.services.ai_service import AIService
 from app.agents.memory_agent import MemoryAgent
 from app.agents.task_agent import TaskAgent
 from app.tools.web_search import get_web_search
+
+# Pipeline imports (optional - for new multi-stage architecture)
+try:
+    from app.services.pipeline import create_pipeline, Pipeline
+    PIPELINE_AVAILABLE = True
+except ImportError:
+    PIPELINE_AVAILABLE = False
+    Pipeline = None
 
 # Max context limits to avoid token overflow
 MAX_MEMORIES = 5
@@ -25,7 +34,8 @@ TASK_DISCUSSION_KEYWORDS = [
 
 class ConversationAgent:
     def __init__(self, ai_service: AIService, memory_agent: MemoryAgent, task_agent: TaskAgent,
-                 vector_processor=None, calendar_service=None, email_service=None, keep_service=None):
+                 vector_processor=None, calendar_service=None, email_service=None, keep_service=None,
+                 sheets_client=None, use_pipeline: bool = None):
         self.ai = ai_service
         self.memory = memory_agent
         self.tasks = task_agent
@@ -34,6 +44,36 @@ class ConversationAgent:
         self.calendar = calendar_service  # Optional: enables calendar integration
         self.email = email_service  # Optional: enables email drafts
         self.keep = keep_service  # Optional: enables Google Keep notes
+        self.sheets_client = sheets_client
+
+        # Determine whether to use the new multi-stage pipeline
+        # Can be set via environment variable or constructor argument
+        if use_pipeline is None:
+            use_pipeline = os.getenv('USE_PIPELINE', 'false').lower() == 'true'
+
+        self.use_pipeline = use_pipeline and PIPELINE_AVAILABLE
+        self.pipeline: Optional[Pipeline] = None
+
+        if self.use_pipeline:
+            groq_api_key = os.getenv('GROQ_API_KEY', '')
+            if groq_api_key:
+                self.pipeline = create_pipeline(
+                    groq_api_key=groq_api_key,
+                    memory_agent=memory_agent,
+                    task_agent=task_agent,
+                    calendar_service=calendar_service,
+                    email_service=email_service,
+                    keep_service=keep_service,
+                    vector_processor=vector_processor,
+                    sheets_client=sheets_client
+                )
+                print("[ConversationAgent] Multi-stage pipeline enabled")
+            else:
+                print("[ConversationAgent] Pipeline requested but GROQ_API_KEY not found")
+                self.use_pipeline = False
+        else:
+            if use_pipeline and not PIPELINE_AVAILABLE:
+                print("[ConversationAgent] Pipeline requested but not available (import failed)")
 
     def _compress_context(self, context: Dict, user_message: str) -> Dict:
         """Compress context to fit within token limits using semantic relevance"""
@@ -203,11 +243,56 @@ class ConversationAgent:
 
     async def handle_conversation_flow(self, user_id: str, user_message: str, context: Dict) -> str:
         """Manage conversation flow and determine next actions"""
+        # Use new multi-stage pipeline if enabled
+        if self.use_pipeline and self.pipeline:
+            return await self._handle_with_pipeline(user_id, user_message, context)
+
+        # Otherwise, use legacy monolithic approach
+        return await self._handle_legacy_flow(user_id, user_message, context)
+
+    async def _handle_with_pipeline(self, user_id: str, user_message: str, context: Dict) -> str:
+        """Handle conversation using the new multi-stage pipeline."""
+        try:
+            # Convert context to conversation history format expected by pipeline
+            conversation_history = []
+            for conv in context.get('conversations', [])[-10:]:
+                conversation_history.append({
+                    "message_type": conv.get('message_type', 'user'),
+                    "content": str(conv.get('content', ''))
+                })
+
+            # Process through pipeline
+            result = await self.pipeline.process_message(
+                user_id=user_id,
+                user_message=user_message,
+                conversation_history=conversation_history
+            )
+
+            response = result.get('response', '')
+            if not response:
+                response = "I'm not sure how to help with that. Could you rephrase?"
+
+            # Log pipeline result for debugging
+            print(f"[Pipeline] Route: {result.get('route', {})}")
+            print(f"[Pipeline] Actions: {len(result.get('actions_executed', []))} executed")
+            print(f"[Pipeline] Awaiting confirmation: {result.get('awaiting_confirmation', False)}")
+
+            return response
+
+        except Exception as e:
+            print(f"[Pipeline] Error: {e}")
+            import traceback
+            traceback.print_exc()
+            # Fall back to legacy on pipeline error
+            return await self._handle_legacy_flow(user_id, user_message, context)
+
+    async def _handle_legacy_flow(self, user_id: str, user_message: str, context: Dict) -> str:
+        """Legacy monolithic conversation handling."""
         try:
             # COMPRESS context to fit within token limits
             compressed_context = self._compress_context(context, user_message)
             print(f"Compressed context: {len(compressed_context['memories'])} memories, {len(compressed_context['tasks'])} tasks")
-            
+
             # Get AI analysis of the user input with compressed context
             analysis = await self.ai.reason_and_act(compressed_context, user_message)
 
