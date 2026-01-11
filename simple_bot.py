@@ -43,6 +43,9 @@ class SimpleTelegramBot:
         # Task discussion sessions (for 5-min timeout)
         self.task_discussion_sessions = {}  # user_id -> {'task_id': str, 'started_at': datetime}
 
+        # Pinned dashboard message IDs per user (chat_id -> message_id)
+        self.pinned_dashboards = {}
+
         # Initialize bot components
         self.initialize_components()
 
@@ -177,14 +180,38 @@ class SimpleTelegramBot:
             print(f"Error getting updates: {e}")
             return None
 
-    def send_message(self, chat_id, text):
-        """Send message to Telegram"""
+    def send_chat_action(self, chat_id, action="typing"):
+        """Send chat action (typing indicator) to Telegram.
+
+        Actions: typing, upload_photo, upload_document, upload_video,
+                 record_voice, upload_voice, find_location, record_video_note
+        """
+        try:
+            data = {'chat_id': chat_id, 'action': action}
+            response = requests.post(
+                f"{self.api_url}/sendChatAction",
+                data=data,
+                timeout=5
+            )
+            return response.json().get('ok', False)
+        except Exception as e:
+            print(f"Error sending chat action: {e}")
+            return False
+
+    def send_message(self, chat_id, text, reply_markup=None, parse_mode=None):
+        """Send message to Telegram with optional inline keyboard"""
         try:
             # Truncate very long messages
             if len(text) > 4000:
                 text = text[:3997] + "..."
 
             data = {'chat_id': chat_id, 'text': text}
+            if reply_markup:
+                import json
+                data['reply_markup'] = json.dumps(reply_markup)
+            if parse_mode:
+                data['parse_mode'] = parse_mode
+
             response = requests.post(
                 f"{self.api_url}/sendMessage",
                 data=data,
@@ -193,12 +220,176 @@ class SimpleTelegramBot:
             result = response.json()
             if result.get('ok'):
                 print(f"[TELEGRAM] Message sent successfully to {chat_id}")
+                return result
             else:
                 print(f"[TELEGRAM] Failed to send: {result}")
             return result
         except Exception as e:
             print(f"Error sending message: {e}")
             return None
+
+    def edit_message(self, chat_id, message_id, text, reply_markup=None, parse_mode=None):
+        """Edit an existing message"""
+        try:
+            if len(text) > 4000:
+                text = text[:3997] + "..."
+
+            data = {
+                'chat_id': chat_id,
+                'message_id': message_id,
+                'text': text
+            }
+            if reply_markup:
+                import json
+                data['reply_markup'] = json.dumps(reply_markup)
+            if parse_mode:
+                data['parse_mode'] = parse_mode
+
+            response = requests.post(
+                f"{self.api_url}/editMessageText",
+                data=data,
+                timeout=10
+            )
+            result = response.json()
+            if result.get('ok'):
+                print(f"[TELEGRAM] Message edited successfully")
+            return result
+        except Exception as e:
+            print(f"Error editing message: {e}")
+            return None
+
+    def pin_message(self, chat_id, message_id, disable_notification=True):
+        """Pin a message in the chat"""
+        try:
+            data = {
+                'chat_id': chat_id,
+                'message_id': message_id,
+                'disable_notification': disable_notification
+            }
+            response = requests.post(
+                f"{self.api_url}/pinChatMessage",
+                data=data,
+                timeout=10
+            )
+            result = response.json()
+            if result.get('ok'):
+                print(f"[TELEGRAM] Message pinned successfully")
+            return result
+        except Exception as e:
+            print(f"Error pinning message: {e}")
+            return None
+
+    def answer_callback_query(self, callback_query_id, text=None, show_alert=False):
+        """Answer a callback query (stops button spinner)"""
+        try:
+            data = {'callback_query_id': callback_query_id}
+            if text:
+                data['text'] = text
+            data['show_alert'] = show_alert
+
+            response = requests.post(
+                f"{self.api_url}/answerCallbackQuery",
+                data=data,
+                timeout=5
+            )
+            return response.json().get('ok', False)
+        except Exception as e:
+            print(f"Error answering callback query: {e}")
+            return False
+
+    def _generate_dashboard_text(self, user_id):
+        """Generate the live dashboard text for a user"""
+        try:
+            import asyncio
+            import nest_asyncio
+            nest_asyncio.apply()
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            try:
+                async def get_data():
+                    tasks = await self.task_agent.get_prioritized_tasks(user_id, limit=10, status='pending')
+                    calendar_events = []
+                    if hasattr(self, 'calendar_service') and self.calendar_service:
+                        calendar_events = await self.calendar_service.get_upcoming_events(max_results=5, days_ahead=1)
+                    return tasks, calendar_events
+
+                tasks, events = loop.run_until_complete(get_data())
+            finally:
+                loop.close()
+
+            now = datetime.now(BRISBANE_TZ)
+            lines = [
+                f"BRAIN AGENT DASHBOARD",
+                f"{now.strftime('%A, %B %d')} - {now.strftime('%I:%M %p')}",
+                "",
+                "TODAY'S SCHEDULE:"
+            ]
+
+            if events:
+                for event in events[:5]:
+                    time_str = event.get('time', 'All day')
+                    title = event.get('title', 'Untitled')
+                    lines.append(f"  {time_str} - {title}")
+            else:
+                lines.append("  No events scheduled")
+
+            lines.extend(["", "PRIORITY TASKS:"])
+
+            if tasks:
+                for i, task in enumerate(tasks[:5], 1):
+                    title = task.get('title', 'Untitled')
+                    priority = task.get('priority', 'medium')
+                    status = task.get('status', 'pending')
+                    priority_icon = {'high': '!', 'medium': '-', 'low': ' '}.get(priority, '-')
+                    check = 'x' if status == 'completed' else ' '
+                    lines.append(f"  [{check}] {priority_icon} {title}")
+            else:
+                lines.append("  No pending tasks")
+
+            lines.extend([
+                "",
+                f"Last updated: {now.strftime('%H:%M')}"
+            ])
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            print(f"Error generating dashboard: {e}")
+            return f"Dashboard unavailable - {e}"
+
+    def send_or_update_dashboard(self, user_id, chat_id):
+        """Send a new dashboard or update existing pinned one"""
+        try:
+            dashboard_text = self._generate_dashboard_text(user_id)
+
+            # Check if we have an existing pinned dashboard
+            if chat_id in self.pinned_dashboards:
+                message_id = self.pinned_dashboards[chat_id]
+                # Try to update it
+                result = self.edit_message(chat_id, message_id, dashboard_text)
+                if result and result.get('ok'):
+                    print(f"[DASHBOARD] Updated pinned dashboard for {chat_id}")
+                    return result
+                # If update failed (message deleted?), remove from cache
+                del self.pinned_dashboards[chat_id]
+
+            # Send new dashboard
+            result = self.send_message(chat_id, dashboard_text)
+            if result and result.get('ok'):
+                message_id = result['result']['message_id']
+                # Pin it
+                pin_result = self.pin_message(chat_id, message_id)
+                if pin_result and pin_result.get('ok'):
+                    self.pinned_dashboards[chat_id] = message_id
+                    print(f"[DASHBOARD] Created and pinned new dashboard for {chat_id}")
+                return result
+
+            return None
+
+        except Exception as e:
+            print(f"Error with dashboard: {e}")
             return None
 
     def should_process_message(self, message):
@@ -254,10 +445,17 @@ class SimpleTelegramBot:
             print(f"  \"{text}\"")
             print(f"{'='*50}")
 
+            # Show typing indicator immediately (masks latency)
+            self.send_chat_action(chat_id, "typing")
+
             # Handle commands
             if text.startswith('/'):
                 response = self._handle_command(text, user_id, first_name)
-                if response:
+                if response == "__DASHBOARD__":
+                    # Special handling for dashboard command
+                    self.send_or_update_dashboard(user_id, chat_id)
+                    return
+                elif response:
                     self.send_message(chat_id, response)
                     return
 
@@ -282,12 +480,32 @@ class SimpleTelegramBot:
             print(f"Context loaded: {len(context.get('memories', []))} memories, {len(context.get('tasks', []))} tasks")
 
             # Process through AI conversation agent
-            response = self._process_with_ai(user_id, text, context)
+            result = self._process_with_ai(user_id, text, context)
+
+            # Handle both string responses and dict responses (from pipeline)
+            if isinstance(result, dict):
+                response = result.get('response', '')
+                awaiting_confirmation = result.get('awaiting_confirmation', False)
+            else:
+                response = result
+                awaiting_confirmation = False
 
             # Send single response - ensure we only have one response
             print(f"[DEBUG BOT] Raw response length: {len(response)}")
             print(f"[DEBUG BOT] RESPONSE: {response[:200]}..." if len(response) > 200 else f"[DEBUG BOT] RESPONSE: {response}")
-            self.send_message(chat_id, response)
+            print(f"[Pipeline] Awaiting confirmation: {awaiting_confirmation}")
+
+            # Add confirmation buttons if awaiting confirmation
+            if awaiting_confirmation:
+                reply_markup = {
+                    'inline_keyboard': [[
+                        {'text': 'Yes, do it', 'callback_data': 'confirm_yes'},
+                        {'text': 'No, cancel', 'callback_data': 'confirm_no'}
+                    ]]
+                }
+                self.send_message(chat_id, response, reply_markup=reply_markup)
+            else:
+                self.send_message(chat_id, response)
 
             # Store conversation history
             self._store_conversation(user_id, "user", text)
@@ -301,6 +519,245 @@ class SimpleTelegramBot:
                 self.send_message(message['chat']['id'], "Sorry, I encountered an error. Please try again.")
             except:
                 pass
+
+    def _handle_callback_query(self, callback_query):
+        """Handle inline keyboard button presses"""
+        try:
+            query_id = callback_query['id']
+            user_id = str(callback_query['from']['id'])
+            chat_id = callback_query['message']['chat']['id']
+            message_id = callback_query['message']['message_id']
+            data = callback_query.get('data', '')
+
+            print(f"[CALLBACK] User {user_id} pressed: {data}")
+
+            # Answer callback immediately to stop spinner
+            self.answer_callback_query(query_id)
+
+            # Parse callback data (format: action:param1:param2)
+            parts = data.split(':')
+            action = parts[0] if parts else ''
+
+            if action == 'confirm_yes':
+                # User confirmed a high-stakes action
+                self._execute_pending_confirmation(user_id, chat_id, message_id, confirmed=True)
+
+            elif action == 'confirm_no':
+                # User cancelled
+                self._execute_pending_confirmation(user_id, chat_id, message_id, confirmed=False)
+
+            elif action == 'task_done':
+                # Mark task as complete
+                task_id = parts[1] if len(parts) > 1 else None
+                if task_id:
+                    self._complete_task_via_button(user_id, chat_id, message_id, task_id)
+
+            elif action == 'snooze':
+                # Snooze reminder
+                minutes = int(parts[1]) if len(parts) > 1 else 60
+                self._snooze_reminder(user_id, chat_id, message_id, minutes)
+
+            elif action == 'ack':
+                # Acknowledge reminder (dismiss)
+                self.edit_message(chat_id, message_id, "Got it, acknowledged.")
+
+        except Exception as e:
+            print(f"Error handling callback query: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _execute_pending_confirmation(self, user_id, chat_id, message_id, confirmed):
+        """Execute or cancel a pending confirmation"""
+        try:
+            # Get pending action from pipeline's confirmation manager
+            if hasattr(self, 'conversation_agent') and hasattr(self.conversation_agent, 'pipeline'):
+                pipeline = self.conversation_agent.pipeline
+                if pipeline and hasattr(pipeline, 'confirmation_manager'):
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
+                    pending = loop.run_until_complete(
+                        pipeline.confirmation_manager.get_pending_action(user_id)
+                    )
+
+                    if pending and confirmed:
+                        # Execute the action
+                        action_plan = pending.get('action_plan', {})
+                        result = loop.run_until_complete(
+                            pipeline._execute_actions(user_id, action_plan)
+                        )
+                        loop.run_until_complete(
+                            pipeline.confirmation_manager.clear_pending_action(user_id)
+                        )
+
+                        if result.get('success'):
+                            self.edit_message(chat_id, message_id, "Done! Action completed successfully.")
+                        else:
+                            errors = [a.get('error', 'Unknown error') for a in result.get('actions', []) if not a.get('success')]
+                            self.edit_message(chat_id, message_id, f"Action failed: {'; '.join(errors)}")
+
+                    elif pending and not confirmed:
+                        loop.run_until_complete(
+                            pipeline.confirmation_manager.clear_pending_action(user_id)
+                        )
+                        self.edit_message(chat_id, message_id, "Cancelled. I won't do that.")
+
+                    else:
+                        self.edit_message(chat_id, message_id, "No pending action found (may have expired).")
+
+                    loop.close()
+                    return
+
+            # Fallback if pipeline not available
+            if confirmed:
+                self.edit_message(chat_id, message_id, "Confirmed (but no pending action found).")
+            else:
+                self.edit_message(chat_id, message_id, "Cancelled.")
+
+        except Exception as e:
+            print(f"Error executing confirmation: {e}")
+            self.edit_message(chat_id, message_id, f"Error: {e}")
+
+    def _complete_task_via_button(self, user_id, chat_id, message_id, task_id):
+        """Complete a task via inline button"""
+        try:
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(self.task_agent.complete_task(user_id, task_id))
+            loop.close()
+
+            self.edit_message(chat_id, message_id, f"Task completed! {result}")
+        except Exception as e:
+            print(f"Error completing task: {e}")
+            self.edit_message(chat_id, message_id, f"Failed to complete task: {e}")
+
+    def _snooze_reminder(self, user_id, chat_id, message_id, minutes):
+        """Snooze a reminder"""
+        self.edit_message(chat_id, message_id, f"Snoozed for {minutes} minutes. I'll remind you again.")
+        # TODO: Implement actual snooze logic with scheduler
+
+    def _handle_voice_message(self, message):
+        """Handle voice messages - transcribe with Whisper and process"""
+        try:
+            user_id = str(message['from']['id'])
+            chat_id = message['chat']['id']
+            username = message['from'].get('username', 'unknown')
+            voice = message['voice']
+            file_id = voice['file_id']
+            duration = voice.get('duration', 0)
+
+            print(f"\n{'='*50}")
+            print(f"VOICE from @{username} ({user_id}): {duration}s")
+            print(f"{'='*50}")
+
+            # Show typing indicator
+            self.send_chat_action(chat_id, "typing")
+
+            # Get file path from Telegram
+            file_info = self._get_file_info(file_id)
+            if not file_info:
+                self.send_message(chat_id, "Sorry, I couldn't process that voice message.")
+                return
+
+            file_path = file_info.get('result', {}).get('file_path')
+            if not file_path:
+                self.send_message(chat_id, "Sorry, I couldn't download that voice message.")
+                return
+
+            # Download the file
+            file_url = f"https://api.telegram.org/file/bot{self.token}/{file_path}"
+            audio_data = self._download_file(file_url)
+            if not audio_data:
+                self.send_message(chat_id, "Sorry, I couldn't download that voice message.")
+                return
+
+            # Transcribe with Groq Whisper
+            transcription = self._transcribe_audio(audio_data, file_path)
+            if not transcription:
+                self.send_message(chat_id, "Sorry, I couldn't transcribe that voice message. Please try again or type your message.")
+                return
+
+            print(f"[TRANSCRIPTION] {transcription}")
+
+            # Process the transcribed text like a normal message
+            context = self._load_user_context(user_id)
+            response = self._process_with_ai(user_id, transcription, context)
+
+            # Send response with transcription preview
+            full_response = f'I heard: "{transcription[:100]}{"..." if len(transcription) > 100 else ""}"\n\n{response}'
+            self.send_message(chat_id, full_response)
+
+            # Store conversation
+            self._store_conversation(user_id, "user", f"[Voice] {transcription}")
+            self._store_conversation(user_id, "assistant", response)
+
+        except Exception as e:
+            print(f"Error handling voice message: {e}")
+            import traceback
+            traceback.print_exc()
+            self.send_message(message['chat']['id'], "Sorry, I had trouble processing that voice message.")
+
+    def _get_file_info(self, file_id):
+        """Get file info from Telegram"""
+        try:
+            response = requests.post(
+                f"{self.api_url}/getFile",
+                data={'file_id': file_id},
+                timeout=10
+            )
+            return response.json()
+        except Exception as e:
+            print(f"Error getting file info: {e}")
+            return None
+
+    def _download_file(self, file_url):
+        """Download a file from Telegram"""
+        try:
+            response = requests.get(file_url, timeout=30)
+            if response.status_code == 200:
+                return response.content
+            return None
+        except Exception as e:
+            print(f"Error downloading file: {e}")
+            return None
+
+    def _transcribe_audio(self, audio_data, filename):
+        """Transcribe audio using Groq Whisper"""
+        try:
+            import tempfile
+            import os
+
+            # Groq expects a file, so save temporarily
+            suffix = '.ogg' if filename.endswith('.oga') or filename.endswith('.ogg') else '.mp3'
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as f:
+                f.write(audio_data)
+                temp_path = f.name
+
+            try:
+                # Use Groq's Whisper API
+                from groq import Groq
+                client = Groq(api_key=os.getenv('GROQ_API_KEY'))
+
+                with open(temp_path, 'rb') as audio_file:
+                    transcription = client.audio.transcriptions.create(
+                        file=(filename, audio_file),
+                        model="whisper-large-v3",
+                        response_format="text"
+                    )
+
+                return transcription.strip() if transcription else None
+
+            finally:
+                # Clean up temp file
+                os.unlink(temp_path)
+
+        except Exception as e:
+            print(f"Error transcribing audio: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
     def _handle_command(self, text: str, user_id: str, first_name: str) -> str:
         """Handle bot commands"""
@@ -334,6 +791,7 @@ COMMANDS:
 - /tasks - View and manage your tasks
 - /memories - View stored memories
 - /calendar - View upcoming events
+- /dashboard - Show/update pinned dashboard
 - /check archives <term> - Search archived tasks
 - /new session - End current task discussion
 
@@ -463,6 +921,10 @@ Ready to assist you!"""
                 return event_list
             except Exception as e:
                 return f"Error loading calendar: {str(e)}"
+
+        elif command == '/dashboard':
+            # Dashboard is handled specially - returns None to trigger dashboard send
+            return "__DASHBOARD__"
 
         elif text.lower().startswith('/check archives') or text.lower().startswith('/archives'):
             # Search archived tasks
@@ -626,12 +1088,16 @@ Ready to assist you!"""
                         # Update offset FIRST to prevent reprocessing
                         self.offset = update['update_id'] + 1
 
-                        if 'message' in update and 'text' in update['message']:
+                        # Handle callback queries (inline button presses)
+                        if 'callback_query' in update:
+                            self._handle_callback_query(update['callback_query'])
+
+                        elif 'message' in update and 'text' in update['message']:
                             # Track known users for proactive features (persistent)
                             user_id = str(update['message']['from']['id'])
                             chat_id = update['message']['chat']['id']
                             username = update['message']['from'].get('username', '')
-                            
+
                             # Add to in-memory set
                             if (user_id, chat_id) not in self.known_users:
                                 self.known_users.add((user_id, chat_id))
@@ -640,12 +1106,16 @@ Ready to assist you!"""
                             else:
                                 # Update last_active for existing user (in background)
                                 threading.Thread(
-                                    target=self._save_user, 
+                                    target=self._save_user,
                                     args=(user_id, chat_id, username),
                                     daemon=True
                                 ).start()
 
                             self.process_message(update['message'])
+
+                        # Handle voice messages
+                        elif 'message' in update and 'voice' in update['message']:
+                            self._handle_voice_message(update['message'])
 
                 # Small delay between polling cycles
                 time.sleep(0.5)

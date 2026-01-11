@@ -241,8 +241,13 @@ class ConversationAgent:
         
         return compressed
 
-    async def handle_conversation_flow(self, user_id: str, user_message: str, context: Dict) -> str:
-        """Manage conversation flow and determine next actions"""
+    async def handle_conversation_flow(self, user_id: str, user_message: str, context: Dict):
+        """Manage conversation flow and determine next actions.
+
+        Returns:
+            If using pipeline: Dict with 'response', 'awaiting_confirmation', etc.
+            If using legacy: str (just the response)
+        """
         # Use new multi-stage pipeline if enabled
         if self.use_pipeline and self.pipeline:
             return await self._handle_with_pipeline(user_id, user_message, context)
@@ -250,7 +255,7 @@ class ConversationAgent:
         # Otherwise, use legacy monolithic approach
         return await self._handle_legacy_flow(user_id, user_message, context)
 
-    async def _handle_with_pipeline(self, user_id: str, user_message: str, context: Dict) -> str:
+    async def _handle_with_pipeline(self, user_id: str, user_message: str, context: Dict) -> Dict:
         """Handle conversation using the new multi-stage pipeline."""
         try:
             # Convert context to conversation history format expected by pipeline
@@ -271,20 +276,23 @@ class ConversationAgent:
             response = result.get('response', '')
             if not response:
                 response = "I'm not sure how to help with that. Could you rephrase?"
+                result['response'] = response
 
             # Log pipeline result for debugging
             print(f"[Pipeline] Route: {result.get('route', {})}")
             print(f"[Pipeline] Actions: {len(result.get('actions_executed', []))} executed")
             print(f"[Pipeline] Awaiting confirmation: {result.get('awaiting_confirmation', False)}")
 
-            return response
+            # Return full result dict so caller can access awaiting_confirmation
+            return result
 
         except Exception as e:
             print(f"[Pipeline] Error: {e}")
             import traceback
             traceback.print_exc()
-            # Fall back to legacy on pipeline error
-            return await self._handle_legacy_flow(user_id, user_message, context)
+            # Fall back to legacy on pipeline error (returns string)
+            legacy_response = await self._handle_legacy_flow(user_id, user_message, context)
+            return {'response': legacy_response, 'awaiting_confirmation': False}
 
     async def _handle_legacy_flow(self, user_id: str, user_message: str, context: Dict) -> str:
         """Legacy monolithic conversation handling."""
