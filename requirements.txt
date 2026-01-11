@@ -14,6 +14,9 @@ groq>=0.4.1
 langchain-groq>=0.1.0
 
 # Vector Processing & Search
+# Use CPU-only torch to save disk space (no CUDA needed on cloud)
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
 sentence-transformers>=2.2.2
 numpy>=1.24.3
 
