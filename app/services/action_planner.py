@@ -82,6 +82,8 @@ TASK ACTIONS:
 - update: {{find_by (title substring), changes}}
 - complete: {{find_by (title substring)}}
 - delete: {{find_by (title substring)}} [REQUIRES CONFIRMATION]
+- list: {{status (pending/completed/all), limit}} - list tasks
+- check_in: {{find_by (optional - if empty, pick any pending task)}} - start progress check-in on a task
 
 CALENDAR ACTIONS:
 - create_event: {{summary, start_time (ISO format), end_time, location}}

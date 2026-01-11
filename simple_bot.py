@@ -40,6 +40,16 @@ class SimpleTelegramBot:
         self.last_proactive_check = datetime.now(BRISBANE_TZ)
         self.last_task_checkin = {}  # Track when task check-ins were sent per user
 
+        # Configurable check-in times (default: 10am, 2pm, 6pm)
+        # Can be overridden via env var CHECKIN_HOURS (comma-separated, e.g., "9,13,17")
+        # Or per-user via /settings command
+        default_hours = os.getenv('CHECKIN_HOURS', '10,14,18')
+        self.default_checkin_hours = [int(h.strip()) for h in default_hours.split(',')]
+        self.user_checkin_hours = {}  # user_id -> list of hours
+
+        # Daily summary hour (default: 9am)
+        self.daily_summary_hour = int(os.getenv('DAILY_SUMMARY_HOUR', '9'))
+
         # Task discussion sessions (for 5-min timeout)
         self.task_discussion_sessions = {}  # user_id -> {'task_id': str, 'started_at': datetime}
 
@@ -683,15 +693,33 @@ class SimpleTelegramBot:
 
             # Process the transcribed text like a normal message
             context = self._load_user_context(user_id)
-            response = self._process_with_ai(user_id, transcription, context)
+            result = self._process_with_ai(user_id, transcription, context)
+
+            # Handle both string responses and dict responses (from pipeline)
+            if isinstance(result, dict):
+                response_text = result.get('response', '')
+                awaiting_confirmation = result.get('awaiting_confirmation', False)
+            else:
+                response_text = result
+                awaiting_confirmation = False
 
             # Send response with transcription preview
-            full_response = f'I heard: "{transcription[:100]}{"..." if len(transcription) > 100 else ""}"\n\n{response}'
-            self.send_message(chat_id, full_response)
+            full_response = f'I heard: "{transcription[:100]}{"..." if len(transcription) > 100 else ""}"\n\n{response_text}'
+
+            if awaiting_confirmation:
+                reply_markup = {
+                    'inline_keyboard': [[
+                        {'text': 'Yes, do it', 'callback_data': 'confirm_yes'},
+                        {'text': 'No, cancel', 'callback_data': 'confirm_no'}
+                    ]]
+                }
+                self.send_message(chat_id, full_response, reply_markup=reply_markup)
+            else:
+                self.send_message(chat_id, full_response)
 
             # Store conversation
             self._store_conversation(user_id, "user", f"[Voice] {transcription}")
-            self._store_conversation(user_id, "assistant", response)
+            self._store_conversation(user_id, "assistant", response_text)
 
         except Exception as e:
             print(f"Error handling voice message: {e}")
@@ -800,11 +828,13 @@ COMMANDS:
 - /memories - View stored memories
 - /calendar - View upcoming events
 - /dashboard - Show/update pinned dashboard
+- /settings - Configure check-in times
 - /check archives <term> - Search archived tasks
 - /new session - End current task discussion
 
 PROACTIVE FEATURES:
-- I'll check in on your tasks 3x daily (10am, 2pm, 6pm)
+- I'll check in on your tasks at configurable times
+- Use /settings to change check-in schedule
 - Quick replies: "50%", "done", "blocked", "skip"
 - Tasks auto-archive 7 days after completion
 
@@ -933,6 +963,53 @@ Ready to assist you!"""
         elif command == '/dashboard':
             # Dashboard is handled specially - returns None to trigger dashboard send
             return "__DASHBOARD__"
+
+        elif command == '/settings' or text.lower().startswith('/settings'):
+            parts = text.split()
+            if len(parts) == 1:
+                # Show current settings
+                user_hours = self.user_checkin_hours.get(user_id, self.default_checkin_hours)
+                hours_str = ', '.join([f"{h}:00" for h in user_hours])
+                return f"""SETTINGS
+
+CHECK-IN TIMES:
+Currently: {hours_str}
+
+To change, use:
+/settings checkin 9,13,17
+(comma-separated hours in 24h format)
+
+DAILY SUMMARY:
+Currently: {self.daily_summary_hour}:00 AM
+
+Examples:
+- /settings checkin 8,12,18 (8am, 12pm, 6pm)
+- /settings checkin off (disable check-ins)
+- /settings checkin default (reset to default)"""
+
+            elif len(parts) >= 3 and parts[1].lower() == 'checkin':
+                setting = parts[2].lower()
+                if setting == 'off':
+                    self.user_checkin_hours[user_id] = []
+                    return "Task check-ins disabled. Use '/settings checkin default' to re-enable."
+                elif setting == 'default':
+                    if user_id in self.user_checkin_hours:
+                        del self.user_checkin_hours[user_id]
+                    return f"Check-in times reset to default: {', '.join([f'{h}:00' for h in self.default_checkin_hours])}"
+                else:
+                    try:
+                        hours = [int(h.strip()) for h in setting.split(',')]
+                        # Validate hours (0-23)
+                        if all(0 <= h <= 23 for h in hours):
+                            self.user_checkin_hours[user_id] = sorted(hours)
+                            hours_str = ', '.join([f"{h}:00" for h in sorted(hours)])
+                            return f"Check-in times updated to: {hours_str}"
+                        else:
+                            return "Invalid hours. Use 0-23 (24-hour format)."
+                    except ValueError:
+                        return "Invalid format. Use comma-separated hours, e.g., /settings checkin 9,14,18"
+            else:
+                return "Unknown setting. Try /settings to see available options."
 
         elif text.lower().startswith('/check archives') or text.lower().startswith('/archives'):
             # Search archived tasks
@@ -1144,12 +1221,12 @@ Ready to assist you!"""
                 # Check every 5 minutes
                 time.sleep(300)
 
-                # Daily summary at 9 AM
-                if now.hour == 9 and now.minute < 5:
+                # Daily summary (configurable hour, default 9 AM)
+                if now.hour == self.daily_summary_hour and now.minute < 5:
                     self._send_daily_summaries()
 
-                # Proactive task check-ins 3x daily: 10 AM, 2 PM, 6 PM
-                if now.hour in [10, 14, 18] and now.minute < 5:
+                # Proactive task check-ins at configurable hours
+                if now.hour in self.default_checkin_hours and now.minute < 5:
                     self._send_task_checkins()
 
                 # Check for upcoming deadlines

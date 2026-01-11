@@ -393,6 +393,45 @@ class Pipeline:
                     return {"success": True, "data": {"result": "Task updated"}}
                 return {"success": False, "error": "Task not found"}
 
+            elif action_name == "list":
+                status = params.get("status", "pending")
+                limit = params.get("limit", 10)
+                tasks = await self.task_agent.get_prioritized_tasks(user_id, limit=limit, status=status)
+                return {"success": True, "data": {"tasks": tasks, "count": len(tasks)}}
+
+            elif action_name == "check_in":
+                find_by = params.get("find_by", "")
+                if find_by:
+                    task_id = await self._find_task_by_title(user_id, find_by)
+                    if task_id:
+                        tasks = await self.task_agent.get_prioritized_tasks(user_id, limit=50, status='pending')
+                        task = next((t for t in tasks if t.get('task_id') == task_id), None)
+                        if task:
+                            return {
+                                "success": True,
+                                "data": {
+                                    "task": task,
+                                    "check_in_message": f"How's progress on '{task.get('title')}'? (0-100% or 'done'/'blocked')"
+                                }
+                            }
+                    return {"success": False, "error": f"Task '{find_by}' not found"}
+                else:
+                    # Pick any pending task (prioritize high priority)
+                    tasks = await self.task_agent.get_prioritized_tasks(user_id, limit=10, status='pending')
+                    if tasks:
+                        import random
+                        # Prefer high priority, but add some randomness
+                        high_priority = [t for t in tasks if t.get('priority') == 'high']
+                        task = random.choice(high_priority) if high_priority else random.choice(tasks)
+                        return {
+                            "success": True,
+                            "data": {
+                                "task": task,
+                                "check_in_message": f"Let's check in on '{task.get('title')}'. How's it going? (0-100% or 'done'/'blocked')"
+                            }
+                        }
+                    return {"success": False, "error": "No pending tasks to check in on"}
+
             else:
                 return {"success": False, "error": f"Unknown task action: {action_name}"}
 
