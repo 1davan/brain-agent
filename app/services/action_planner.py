@@ -111,11 +111,21 @@ DATE PARSING (use these exact formats):
 - "in 2 hours" = {in_2_hours}
 - Always use ISO format: YYYY-MM-DDTHH:MM:SS
 
+EMAIL FORMATTING:
+- Start with appropriate greeting: "Hey [Name]," (casual) or "Hi [Name]," or "Dear [Name]," (formal)
+- Break content into short paragraphs (2-3 sentences each)
+- Use blank lines between paragraphs
+- End with context-appropriate sign-off:
+  - Casual: "Cheers,\nIvan" or just "Ivan"
+  - Semi-formal: "Thanks,\nIvan" or "Best,\nIvan"
+  - Formal: "Kind regards,\nIvan"
+- Always sign as "Ivan"
+
 IMPORTANT:
 1. Resolve ALL pronouns ("it", "that meeting", "him") using conversation history
 2. If action is marked [REQUIRES CONFIRMATION], set requires_confirmation: true
 3. If you can't determine a required field, set needs_clarification: true
-4. For email body, write a brief but complete message matching the user's tone
+4. For email body, write a brief but complete message with proper structure (greeting, paragraphs, sign-off)
 
 Output ONLY this JSON:
 {{
