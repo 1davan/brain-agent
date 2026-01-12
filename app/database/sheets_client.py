@@ -261,18 +261,52 @@ class SheetsClient:
 
             # Default configuration
             defaults = [
-                ["default_checkin_hours", "10,14,18", "Comma-separated hours for task check-ins (24h format)", "string"],
+                # --- PROACTIVE FEATURES ---
+                ["daily_summary_enabled", "true", "Enable daily morning summary", "bool"],
                 ["daily_summary_hour", "9", "Hour to send daily summary (24h format)", "int"],
-                ["timezone", "Australia/Brisbane", "Timezone for all time calculations", "string"],
+                ["default_checkin_hours", "10,14,18", "Comma-separated hours for task check-ins (24h format)", "string"],
+                ["checkins_enabled", "true", "Enable periodic task check-ins", "bool"],
+                ["deadline_reminders_enabled", "true", "Enable deadline reminder notifications", "bool"],
+                ["reminder_minutes_before", "60", "Minutes before deadline to send reminder", "int"],
+                ["proactive_check_interval", "5", "Minutes between proactive checks", "int"],
+
+                # --- TASK SETTINGS ---
+                ["task_archive_days", "7", "Days after completion to auto-archive tasks", "int"],
+                ["default_task_priority", "medium", "Default priority for new tasks (high/medium/low)", "string"],
+                ["auto_create_calendar_for_tasks", "true", "Auto-create calendar events for timed tasks", "bool"],
+
+                # --- AI CONTEXT LIMITS ---
                 ["max_memories_context", "5", "Max memories to include in AI context", "int"],
                 ["max_tasks_context", "5", "Max tasks to include in AI context", "int"],
                 ["max_conversations_context", "5", "Max conversation history to include", "int"],
-                ["task_archive_days", "7", "Days after completion to auto-archive tasks", "int"],
+                ["discussion_mode_memory_limit", "15", "Max memories in task discussion mode", "int"],
+                ["discussion_mode_task_limit", "15", "Max tasks in task discussion mode", "int"],
+
+                # --- SESSION & INTERACTION ---
                 ["session_timeout_minutes", "5", "Minutes of inactivity before task discussion ends", "int"],
-                ["proactive_check_interval", "5", "Minutes between proactive checks", "int"],
+                ["typing_indicator_enabled", "true", "Show typing indicator while processing", "bool"],
+                ["include_calendar_in_responses", "true", "Include upcoming events in relevant responses", "bool"],
+
+                # --- AI PIPELINE ---
                 ["use_pipeline", "true", "Enable 4-stage AI pipeline (true/false)", "bool"],
-                ["reminder_minutes_before", "60", "Minutes before deadline to send reminder", "int"],
-                ["voice_transcription_enabled", "true", "Enable voice message transcription", "bool"]
+                ["ai_model", "llama-3.3-70b-versatile", "Groq model to use for AI responses", "string"],
+
+                # --- VOICE & MEDIA ---
+                ["voice_transcription_enabled", "true", "Enable voice message transcription", "bool"],
+                ["show_transcription_in_response", "true", "Show transcribed text in bot response", "bool"],
+
+                # --- EMAIL SETTINGS ---
+                ["email_require_confirmation", "true", "Require confirmation before sending emails", "bool"],
+                ["email_default_sign_off", "Best regards", "Default email sign-off text", "string"],
+
+                # --- CALENDAR SETTINGS ---
+                ["calendar_lookahead_days", "7", "Days ahead to show in calendar queries", "int"],
+                ["calendar_delete_requires_confirmation", "true", "Require confirmation to delete events", "bool"],
+
+                # --- SYSTEM ---
+                ["timezone", "Australia/Brisbane", "Timezone for all time calculations", "string"],
+                ["bot_name", "Brain Agent", "Name the bot uses to refer to itself", "string"],
+                ["debug_mode", "false", "Enable verbose debug logging", "bool"]
             ]
 
             # Add all defaults
