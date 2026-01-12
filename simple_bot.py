@@ -1706,20 +1706,20 @@ COMMANDS:
                 print(f"Error auto-archiving tasks for {user_id}: {e}")
 
     def _cleanup_expired_sessions(self):
-        """Clean up task discussion sessions that have timed out (60 minutes)"""
-        now = datetime.now(BRISBANE_TZ)
-        expired = []
+        """Clean up task discussion sessions - NO TIMEOUT, sessions persist until explicitly cleared.
 
-        for user_id, session in self.task_discussion_sessions.items():
-            started_at = session.get('started_at')
-            if started_at:
-                elapsed = (now - started_at).total_seconds()
-                if elapsed > 3600:  # 60 minutes (was 5 min - too short for check-ins)
-                    expired.append(user_id)
+        Sessions are cleared when:
+        - User completes a task (via button or text)
+        - User skips a check-in (via button)
+        - User starts /new session command
+        - A new check-in replaces the old session
 
-        for user_id in expired:
-            del self.task_discussion_sessions[user_id]
-            print(f"Expired task discussion session for {user_id}")
+        The buttons work independently of sessions (task_id in callback data),
+        so sessions are only needed for text replies like "done" or "50%".
+        """
+        # No automatic timeout - let sessions persist
+        # They get replaced when a new check-in is sent anyway
+        pass
 
     def _check_upcoming_deadlines(self):
         """Check for tasks with deadlines approaching"""
