@@ -165,10 +165,19 @@ class SimpleTelegramBot:
             else:
                 print("      SUCCESS: All agents initialized (legacy mode)")
 
+            # Initialize default config if needed
+            print("[+] Checking Config sheet...")
+            self.sheets_client.initialize_default_config()
+
             # Load known users from persistent storage
             print("[+] Loading known users from database...")
             self._load_known_users()
             print(f"      Loaded {len(self.known_users)} known user(s)")
+
+            # Load user settings from persistent storage
+            print("[+] Loading user settings from database...")
+            self._load_user_settings()
+            print(f"      Loaded settings for {len(self.user_checkin_hours)} user(s)")
 
             print("=" * 60)
             print("BOT READY - All systems operational")
@@ -1238,10 +1247,12 @@ COMMANDS:
                 setting = parts[2].lower()
                 if setting == 'off':
                     self.user_checkin_hours[user_id] = []
+                    self._save_user_setting(user_id, 'checkin_hours', 'off')
                     return "Task check-ins disabled. Use '/settings checkin default' to re-enable."
                 elif setting == 'default':
                     if user_id in self.user_checkin_hours:
                         del self.user_checkin_hours[user_id]
+                    self._save_user_setting(user_id, 'checkin_hours', ','.join(map(str, self.default_checkin_hours)))
                     return f"Check-in times reset to default: {', '.join([f'{h}:00' for h in self.default_checkin_hours])}"
                 else:
                     try:
@@ -1249,6 +1260,7 @@ COMMANDS:
                         # Validate hours (0-23)
                         if all(0 <= h <= 23 for h in hours):
                             self.user_checkin_hours[user_id] = sorted(hours)
+                            self._save_user_setting(user_id, 'checkin_hours', ','.join(map(str, sorted(hours))))
                             hours_str = ', '.join([f"{h}:00" for h in sorted(hours)])
                             return f"Check-in times updated to: {hours_str}"
                         else:
@@ -1270,6 +1282,8 @@ COMMANDS:
                     if user_id not in self.skipped_calendar_events:
                         self.skipped_calendar_events[user_id] = set()
                     self.skipped_calendar_events[user_id].add(setting)
+                    # Persist to sheets
+                    self._save_user_setting(user_id, 'skipped_events', '|'.join(self.skipped_calendar_events[user_id]))
                     return f"Will skip '{setting}' in daily summaries.\n\nUse '/settings unskip \"{setting}\"' to show it again."
 
             elif len(parts) >= 3 and parts[1].lower() == 'unskip':
@@ -1278,6 +1292,9 @@ COMMANDS:
                     self.skipped_calendar_events[user_id].discard(event_name)
                     if not self.skipped_calendar_events[user_id]:
                         del self.skipped_calendar_events[user_id]
+                        self._save_user_setting(user_id, 'skipped_events', '')
+                    else:
+                        self._save_user_setting(user_id, 'skipped_events', '|'.join(self.skipped_calendar_events[user_id]))
                 return f"'{event_name}' will now appear in summaries again."
 
             else:
@@ -2115,6 +2132,71 @@ COMMANDS:
         except Exception as e:
             print(f"Error loading known users: {e}")
             self.known_users = set()
+        finally:
+            loop.close()
+
+    def _load_user_settings(self):
+        """Load user settings from persistent storage (Settings sheet)"""
+        import asyncio
+        import nest_asyncio
+        nest_asyncio.apply()
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            async def load():
+                settings_df = await self.sheets_client.get_sheet_data("Settings")
+                if settings_df.empty:
+                    return {}, {}
+
+                checkin_hours = {}
+                skipped_events = {}
+
+                for _, row in settings_df.iterrows():
+                    user_id = str(row.get('user_id', ''))
+                    key = str(row.get('setting_key', ''))
+                    value = str(row.get('setting_value', ''))
+
+                    if not user_id or not key:
+                        continue
+
+                    if key == 'checkin_hours':
+                        if value == 'off':
+                            checkin_hours[user_id] = []
+                        elif value:
+                            try:
+                                checkin_hours[user_id] = [int(h.strip()) for h in value.split(',')]
+                            except ValueError:
+                                pass
+
+                    elif key == 'skipped_events':
+                        if value:
+                            skipped_events[user_id] = set(value.split('|'))
+
+                return checkin_hours, skipped_events
+
+            self.user_checkin_hours, self.skipped_calendar_events = loop.run_until_complete(load())
+        except Exception as e:
+            print(f"Error loading user settings: {e}")
+            self.user_checkin_hours = {}
+            self.skipped_calendar_events = {}
+        finally:
+            loop.close()
+
+    def _save_user_setting(self, user_id: str, setting_key: str, setting_value: str):
+        """Save a user setting to persistent storage"""
+        import asyncio
+        import nest_asyncio
+        nest_asyncio.apply()
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(
+                self.sheets_client.set_user_setting(user_id, setting_key, setting_value)
+            )
+        except Exception as e:
+            print(f"Error saving user setting: {e}")
         finally:
             loop.close()
 

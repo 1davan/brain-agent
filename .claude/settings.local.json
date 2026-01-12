@@ -23,7 +23,9 @@
       "Bash(doctl compute ssh:*)",
       "Bash(doctl compute droplet delete:*)",
       "Bash(DROPLET_IP=170.64.142.252:*)",
-      "Bash(scp:*)"
+      "Bash(scp:*)",
+      "Bash(python:*)",
+      "Bash(curl:*)"
     ]
   }
 }

@@ -42,6 +42,29 @@
   context7: library docs (resolve-library-id first, then query-docs).
 </mcp>
 
+<deployment>
+  CRITICAL RULES - VIOLATING THESE WASTES TIME AND MONEY:
 
+  1. NEVER use DigitalOcean API destructive actions (power_cycle, rebuild, restore, etc.)
+  2. NEVER restart/reboot the droplet - it can wipe the setup
+  3. NEVER reinstall pip packages unless there's a specific error requiring it
+  4. NEVER rebuild or redeploy from scratch - only pull and restart
+
+  TO DEPLOY UPDATES (the ONLY correct method):
+  ssh -i ~/.ssh/sadhuastro_key root@170.64.142.252 \
+    "cd /root/brain_agent && git pull && systemctl restart brain-agent"
+
+  Server: 170.64.142.252
+  SSH Key: ~/.ssh/sadhuastro_key (NOT id_ed25519)
+  Service: brain-agent.service (systemd, not Docker)
+
+  If SSH fails, ASK THE USER - do not try to "fix" it with API actions.
+</deployment>
+
+<security>
+  Only port 22 (SSH) should be open. No other ports.
+  Verify with: ss -tlnp
+  Bot uses outbound polling only - no inbound ports needed.
+</security>
 
 </claude-instructions>
