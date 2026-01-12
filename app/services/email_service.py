@@ -122,8 +122,55 @@ class EmailService:
         return False
 
     def get_contact_email(self, name: str) -> Optional[str]:
-        """Look up email address by contact name."""
-        return self.contacts.get(name.lower())
+        """Look up email address by contact name with fuzzy matching."""
+        name_lower = name.lower().strip()
+
+        # Exact match first
+        if name_lower in self.contacts:
+            return self.contacts[name_lower]
+
+        # Fuzzy match for common transcription errors (e.g., "uzmi" vs "usmi")
+        for contact_name, email in self.contacts.items():
+            # Check if names are similar (within 1-2 character difference)
+            if self._is_similar_name(name_lower, contact_name):
+                print(f"Fuzzy matched '{name}' to contact '{contact_name}'")
+                return email
+
+        return None
+
+    def _is_similar_name(self, name1: str, name2: str) -> bool:
+        """Check if two names are similar enough to be the same person."""
+        # Exact match
+        if name1 == name2:
+            return True
+
+        # Length difference too large
+        if abs(len(name1) - len(name2)) > 2:
+            return False
+
+        # Simple Levenshtein-like check for short names
+        if len(name1) <= 6 and len(name2) <= 6:
+            # Count character differences
+            differences = 0
+            shorter = name1 if len(name1) <= len(name2) else name2
+            longer = name2 if len(name1) <= len(name2) else name1
+
+            j = 0
+            for i, c in enumerate(shorter):
+                if j < len(longer) and c == longer[j]:
+                    j += 1
+                else:
+                    differences += 1
+                    # Try skipping a char in longer
+                    if j + 1 < len(longer) and c == longer[j + 1]:
+                        j += 2
+                    else:
+                        j += 1
+
+            differences += len(longer) - j  # Remaining chars in longer
+            return differences <= 2
+
+        return False
 
     def list_contacts(self) -> Dict[str, str]:
         """Return all known contacts."""

@@ -1947,8 +1947,18 @@ COMMANDS:
         """Handle quick progress update responses during task discussion sessions"""
         import re
 
-        # Check for percentage patterns: "50%", "50 percent", "at 50", "about 50%"
-        percent_match = re.search(r'(\d+)\s*%|(\d+)\s*percent|at\s+(\d+)|about\s+(\d+)', text.lower())
+        text_lower = text.lower()
+
+        # Skip if message contains time-related words - let AI handle scheduling requests
+        time_indicators = ['am', 'pm', 'tomorrow', 'today', 'morning', 'afternoon', 'evening',
+                          'remind', 'calendar', 'schedule', 'deadline', 'by ', 'at ', 'o\'clock',
+                          'email', 'task', 'add', 'create', 'new']
+        if any(indicator in text_lower for indicator in time_indicators):
+            return None  # Let AI handle it
+
+        # Check for percentage patterns: "50%", "50 percent", "about 50%"
+        # Removed "at X" pattern as it conflicts with time expressions like "at 9am"
+        percent_match = re.search(r'(\d+)\s*%|(\d+)\s*percent|about\s+(\d+)\s*%', text_lower)
         if percent_match:
             progress = int(next(g for g in percent_match.groups() if g is not None))
             result = self._update_task_progress_sync(user_id, task_id, progress)
@@ -1959,9 +1969,11 @@ COMMANDS:
                 return f"Awesome! '{task_title}' marked as complete! I'll archive it in 7 days."
             return f"Got it - '{task_title}' is now at {progress}%. Keep it up!"
 
-        # Check for completion words
-        completion_words = ['done', 'complete', 'completed', 'finished', 'finish']
-        if any(word in text.lower() for word in completion_words):
+        # Check for completion words - but only if they appear to be direct progress updates
+        # Skip if the message is longer (likely a different request) or contains scheduling words
+        completion_words = ['done', 'complete', 'completed', 'finished']
+        # "finish" removed - too easily triggered by "finish this by X"
+        if len(text_lower.split()) <= 3 and any(word in text_lower for word in completion_words):
             result = self._update_task_progress_sync(user_id, task_id, 100)
             if user_id in self.task_discussion_sessions:
                 del self.task_discussion_sessions[user_id]

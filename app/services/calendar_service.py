@@ -152,7 +152,7 @@ class CalendarService:
     ) -> Optional[Dict[str, Any]]:
         """
         Create a new calendar event.
-        
+
         Args:
             summary: Event title
             start_time: Event start time (datetime)
@@ -160,7 +160,7 @@ class CalendarService:
             description: Optional event description
             location: Optional event location
             reminder_minutes: Minutes before event to send reminder (default 60)
-            
+
         Returns:
             Created event data or None if failed
         """
@@ -168,6 +168,15 @@ class CalendarService:
             # Ensure timezone
             if start_time.tzinfo is None:
                 start_time = BRISBANE_TZ.localize(start_time)
+
+            # Validate event is not in the past - if so, assume user meant tomorrow
+            now = datetime.now(BRISBANE_TZ)
+            if start_time < now:
+                # Event is in the past - shift to tomorrow at same time
+                days_behind = (now.date() - start_time.date()).days
+                if days_behind > 0:
+                    start_time = start_time + timedelta(days=days_behind + 1)
+                    print(f"[Calendar] Event was in past, shifted to: {start_time.isoformat()}")
             
             if end_time is None:
                 end_time = start_time + timedelta(hours=1)
