@@ -89,7 +89,11 @@ class SimpleTelegramBot:
             )
             print("      SUCCESS: Google Sheets connected")
 
-            print("[2/5] Initializing AI Service (llama-3.3-70b-versatile)...")
+            # Load model settings from Config sheet (with defaults)
+            groq_model = self.sheets_client.get_config_sync("groq_model") or "llama-3.3-70b-versatile"
+            embedding_model = self.sheets_client.get_config_sync("embedding_model") or "all-MiniLM-L6-v2"
+
+            print(f"[2/5] Initializing AI Service ({groq_model})...")
             # Load email writing styles from config if available
             email_style_professional = self.sheets_client.get_config_sync("email_writing_style_professional")
             email_style_casual = self.sheets_client.get_config_sync("email_writing_style_casual")
@@ -99,14 +103,14 @@ class SimpleTelegramBot:
                 print("      Using custom casual email style from Config sheet")
             self.ai_service = AIService(
                 groq_api_key=self.config.groq_api_key,
-                model=self.config.groq_model,
+                model=groq_model,
                 email_style_professional=email_style_professional,
                 email_style_casual=email_style_casual
             )
             print("      SUCCESS: AI service initialized")
 
             print("[3/5] Initializing Vector Processor...")
-            self.vector_processor = VectorProcessor(model_name=self.config.embedding_model)
+            self.vector_processor = VectorProcessor(model_name=embedding_model)
             print("      SUCCESS: Vector processor ready")
 
             print("[4/5] Initializing Memory Agent...")
