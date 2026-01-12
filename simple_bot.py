@@ -602,6 +602,30 @@ class SimpleTelegramBot:
                 # Keep all suggested recurring events (cancel suggestion)
                 self._handle_keep_all_suggested(user_id, chat_id, message_id)
 
+            elif action == 'task_done':
+                # Mark task as complete from check-in button
+                task_id = parts[1] if len(parts) > 1 else ''
+                if task_id:
+                    self._handle_task_button(user_id, chat_id, message_id, task_id, 'done')
+
+            elif action == 'task_progress':
+                # Update task progress from check-in button
+                task_id = parts[1] if len(parts) > 1 else ''
+                progress = int(parts[2]) if len(parts) > 2 else 50
+                if task_id:
+                    self._handle_task_button(user_id, chat_id, message_id, task_id, 'progress', progress)
+
+            elif action == 'task_blocked':
+                # Mark task as blocked from check-in button
+                task_id = parts[1] if len(parts) > 1 else ''
+                if task_id:
+                    self._handle_task_button(user_id, chat_id, message_id, task_id, 'blocked')
+
+            elif action == 'task_skip':
+                # Skip task check-in from button
+                task_id = parts[1] if len(parts) > 1 else ''
+                self._handle_task_button(user_id, chat_id, message_id, task_id, 'skip')
+
         except Exception as e:
             print(f"Error handling callback query: {e}")
             import traceback
@@ -678,6 +702,52 @@ class SimpleTelegramBot:
         """Snooze a reminder"""
         self.edit_message(chat_id, message_id, f"Snoozed for {minutes} minutes. I'll remind you again.")
         # TODO: Implement actual snooze logic with scheduler
+
+    def _handle_task_button(self, user_id, chat_id, message_id, task_id, action, progress=None):
+        """Handle task check-in button presses"""
+        try:
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            # Get task title for response message
+            tasks = loop.run_until_complete(self.task_agent.get_prioritized_tasks(user_id, limit=50, status='all'))
+            task = next((t for t in tasks if t.get('task_id') == task_id), None)
+            task_title = task.get('title', 'Task') if task else 'Task'
+
+            if action == 'done':
+                result = loop.run_until_complete(self.task_agent.complete_task(user_id, task_id))
+                self.edit_message(chat_id, message_id, f"Excellent! '{task_title}' marked as complete! Great work!")
+                # Clear any active session
+                if user_id in self.task_discussion_sessions:
+                    del self.task_discussion_sessions[user_id]
+
+            elif action == 'progress':
+                result = self._update_task_progress_sync(user_id, task_id, progress)
+                self.edit_message(chat_id, message_id, f"Got it - '{task_title}' is now at {progress}%. Keep it up!")
+
+            elif action == 'blocked':
+                self.edit_message(chat_id, message_id, f"I see you're blocked on '{task_title}'. What's holding you up? I can help brainstorm solutions.")
+                # Keep session active for follow-up
+                self.task_discussion_sessions[user_id] = {
+                    'task_id': task_id,
+                    'task_title': task_title,
+                    'started_at': datetime.now(BRISBANE_TZ)
+                }
+
+            elif action == 'skip':
+                self.edit_message(chat_id, message_id, f"No problem! I'll check in on '{task_title}' later.")
+                # Clear session
+                if user_id in self.task_discussion_sessions:
+                    del self.task_discussion_sessions[user_id]
+
+            loop.close()
+
+        except Exception as e:
+            print(f"Error handling task button: {e}")
+            import traceback
+            traceback.print_exc()
+            self.edit_message(chat_id, message_id, f"Error: {e}")
 
     def _suggest_calendar_skips(self, user_id, chat_id):
         """Suggest recurring calendar events to skip in summaries"""
@@ -1592,9 +1662,25 @@ COMMANDS:
                     except:
                         pass
 
-                message += "\n\nReply with your progress (e.g., '50%', 'done', 'blocked') or '/new session' to skip."
+                message += "\n\nReply with your progress or tap a button below:"
 
-                self.send_message(chat_id, message)
+                # Add inline buttons for quick responses
+                task_id = task.get('task_id', '')
+                reply_markup = {
+                    'inline_keyboard': [
+                        [
+                            {'text': 'Done!', 'callback_data': f'task_done:{task_id}'},
+                            {'text': '50%', 'callback_data': f'task_progress:{task_id}:50'},
+                            {'text': '25%', 'callback_data': f'task_progress:{task_id}:25'}
+                        ],
+                        [
+                            {'text': 'Blocked', 'callback_data': f'task_blocked:{task_id}'},
+                            {'text': 'Skip', 'callback_data': f'task_skip:{task_id}'}
+                        ]
+                    ]
+                }
+
+                self.send_message(chat_id, message, reply_markup=reply_markup)
                 self.last_task_checkin[user_id] = (today, current_hour)
 
                 # Start a task discussion session
@@ -1620,7 +1706,7 @@ COMMANDS:
                 print(f"Error auto-archiving tasks for {user_id}: {e}")
 
     def _cleanup_expired_sessions(self):
-        """Clean up task discussion sessions that have timed out (5 minutes)"""
+        """Clean up task discussion sessions that have timed out (60 minutes)"""
         now = datetime.now(BRISBANE_TZ)
         expired = []
 
@@ -1628,7 +1714,7 @@ COMMANDS:
             started_at = session.get('started_at')
             if started_at:
                 elapsed = (now - started_at).total_seconds()
-                if elapsed > 300:  # 5 minutes
+                if elapsed > 3600:  # 60 minutes (was 5 min - too short for check-ins)
                     expired.append(user_id)
 
         for user_id in expired:
