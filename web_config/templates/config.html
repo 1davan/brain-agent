@@ -131,9 +131,9 @@
                 </div>
             </section>
 
-            <!-- Bot Settings -->
+            <!-- Bot Settings - Basic -->
             <section class="card">
-                <h2>Bot Settings</h2>
+                <h2>Basic Settings</h2>
 
                 <div class="form-row">
                     <div class="form-group">
@@ -177,25 +177,249 @@
 
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="checkin_hours">Check-in Hours (comma-separated)</label>
+                        <label for="bot_name">Bot Name</label>
+                        <input type="text" id="bot_name" name="bot_name"
+                               value="{{ config.get('BOT_NAME', 'Brain Agent') }}"
+                               placeholder="Brain Agent">
+                    </div>
+                    <div class="form-group">
+                        <label for="default_task_priority">Default Task Priority</label>
+                        <select id="default_task_priority" name="default_task_priority">
+                            <option value="high" {% if config.get('DEFAULT_TASK_PRIORITY') == 'high' %}selected{% endif %}>High</option>
+                            <option value="medium" {% if config.get('DEFAULT_TASK_PRIORITY', 'medium') == 'medium' %}selected{% endif %}>Medium</option>
+                            <option value="low" {% if config.get('DEFAULT_TASK_PRIORITY') == 'low' %}selected{% endif %}>Low</option>
+                        </select>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Proactive Features -->
+            <section class="card">
+                <h2>Proactive Features</h2>
+                <p class="section-desc">Controls for automatic check-ins, reminders, and summaries.</p>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="checkin_hours">Check-in Hours (comma-separated, 24h)</label>
                         <input type="text" id="checkin_hours" name="checkin_hours"
-                               value="{{ config.get('CHECKIN_HOURS', '10,14,18') }}"
-                               placeholder="10,14,18">
+                               value="{{ config.get('CHECKIN_HOURS', '8,10,12,14,16,18') }}"
+                               placeholder="8,10,12,14,16,18">
                     </div>
                     <div class="form-group">
                         <label for="daily_summary_hour">Daily Summary Hour (24h)</label>
                         <input type="number" id="daily_summary_hour" name="daily_summary_hour"
-                               value="{{ config.get('DAILY_SUMMARY_HOUR', '9') }}"
+                               value="{{ config.get('DAILY_SUMMARY_HOUR', '8') }}"
                                min="0" max="23">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="proactive_check_interval">Proactive Check Interval (minutes)</label>
+                        <input type="number" id="proactive_check_interval" name="proactive_check_interval"
+                               value="{{ config.get('PROACTIVE_CHECK_INTERVAL', '5') }}"
+                               min="1" max="60">
+                    </div>
+                    <div class="form-group">
+                        <label for="reminder_minutes_before">Reminder Before Deadline (minutes)</label>
+                        <input type="number" id="reminder_minutes_before" name="reminder_minutes_before"
+                               value="{{ config.get('REMINDER_MINUTES_BEFORE', '60') }}"
+                               min="5" max="1440">
                     </div>
                 </div>
 
                 <div class="form-group checkbox-group">
                     <label>
-                        <input type="checkbox" name="use_pipeline"
-                               {% if config.get('USE_PIPELINE', 'false').lower() == 'true' %}checked{% endif %}>
-                        Enable 4-stage AI pipeline (experimental)
+                        <input type="checkbox" name="daily_summary_enabled"
+                               {% if config.get('DAILY_SUMMARY_ENABLED', 'true').lower() == 'true' %}checked{% endif %}>
+                        Enable daily morning summary
                     </label>
+                </div>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" name="checkins_enabled"
+                               {% if config.get('CHECKINS_ENABLED', 'true').lower() == 'true' %}checked{% endif %}>
+                        Enable periodic task check-ins
+                    </label>
+                </div>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" name="deadline_reminders_enabled"
+                               {% if config.get('DEADLINE_REMINDERS_ENABLED', 'true').lower() == 'true' %}checked{% endif %}>
+                        Enable deadline reminder notifications
+                    </label>
+                </div>
+            </section>
+
+            <!-- Task & Calendar Settings -->
+            <section class="card">
+                <h2>Task & Calendar Settings</h2>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="task_archive_days">Auto-archive Tasks After (days)</label>
+                        <input type="number" id="task_archive_days" name="task_archive_days"
+                               value="{{ config.get('TASK_ARCHIVE_DAYS', '7') }}"
+                               min="1" max="365">
+                    </div>
+                    <div class="form-group">
+                        <label for="session_timeout_minutes">Task Discussion Timeout (minutes)</label>
+                        <input type="number" id="session_timeout_minutes" name="session_timeout_minutes"
+                               value="{{ config.get('SESSION_TIMEOUT_MINUTES', '5') }}"
+                               min="1" max="60">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="calendar_lookahead_days">Calendar Lookahead (days)</label>
+                        <input type="number" id="calendar_lookahead_days" name="calendar_lookahead_days"
+                               value="{{ config.get('CALENDAR_LOOKAHEAD_DAYS', '7') }}"
+                               min="1" max="30">
+                    </div>
+                    <div class="form-group">
+                        <label for="email_default_sign_off">Default Email Sign-off</label>
+                        <input type="text" id="email_default_sign_off" name="email_default_sign_off"
+                               value="{{ config.get('EMAIL_DEFAULT_SIGN_OFF', 'Best regards') }}"
+                               placeholder="Best regards">
+                    </div>
+                </div>
+
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" name="auto_create_calendar_for_tasks"
+                               {% if config.get('AUTO_CREATE_CALENDAR_FOR_TASKS', 'true').lower() == 'true' %}checked{% endif %}>
+                        Auto-create calendar events for timed tasks
+                    </label>
+                </div>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" name="include_calendar_in_responses"
+                               {% if config.get('INCLUDE_CALENDAR_IN_RESPONSES', 'true').lower() == 'true' %}checked{% endif %}>
+                        Include upcoming events in relevant responses
+                    </label>
+                </div>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" name="calendar_delete_requires_confirmation"
+                               {% if config.get('CALENDAR_DELETE_REQUIRES_CONFIRMATION', 'true').lower() == 'true' %}checked{% endif %}>
+                        Require confirmation to delete calendar events
+                    </label>
+                </div>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" name="email_require_confirmation"
+                               {% if config.get('EMAIL_REQUIRE_CONFIRMATION', 'true').lower() == 'true' %}checked{% endif %}>
+                        Require confirmation before sending emails
+                    </label>
+                </div>
+            </section>
+
+            <!-- AI Context Limits -->
+            <section class="card">
+                <h2>AI Context Limits</h2>
+                <p class="section-desc">Controls how much context is sent to the AI model.</p>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="max_memories_context">Max Memories in Context</label>
+                        <input type="number" id="max_memories_context" name="max_memories_context"
+                               value="{{ config.get('MAX_MEMORIES_CONTEXT', '5') }}"
+                               min="1" max="50">
+                    </div>
+                    <div class="form-group">
+                        <label for="max_tasks_context">Max Tasks in Context</label>
+                        <input type="number" id="max_tasks_context" name="max_tasks_context"
+                               value="{{ config.get('MAX_TASKS_CONTEXT', '5') }}"
+                               min="1" max="50">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="max_conversations_context">Max Conversation History</label>
+                        <input type="number" id="max_conversations_context" name="max_conversations_context"
+                               value="{{ config.get('MAX_CONVERSATIONS_CONTEXT', '5') }}"
+                               min="1" max="50">
+                    </div>
+                    <div class="form-group">
+                        <label for="discussion_mode_memory_limit">Discussion Mode Memory Limit</label>
+                        <input type="number" id="discussion_mode_memory_limit" name="discussion_mode_memory_limit"
+                               value="{{ config.get('DISCUSSION_MODE_MEMORY_LIMIT', '15') }}"
+                               min="1" max="50">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="discussion_mode_task_limit">Discussion Mode Task Limit</label>
+                    <input type="number" id="discussion_mode_task_limit" name="discussion_mode_task_limit"
+                           value="{{ config.get('DISCUSSION_MODE_TASK_LIMIT', '15') }}"
+                           min="1" max="50" style="max-width: 200px;">
+                </div>
+            </section>
+
+            <!-- Voice & Interaction -->
+            <section class="card">
+                <h2>Voice & Interaction</h2>
+
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" name="voice_transcription_enabled"
+                               {% if config.get('VOICE_TRANSCRIPTION_ENABLED', 'true').lower() == 'true' %}checked{% endif %}>
+                        Enable voice message transcription
+                    </label>
+                </div>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" name="show_transcription_in_response"
+                               {% if config.get('SHOW_TRANSCRIPTION_IN_RESPONSE', 'true').lower() == 'true' %}checked{% endif %}>
+                        Show transcribed text in bot response
+                    </label>
+                </div>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" name="typing_indicator_enabled"
+                               {% if config.get('TYPING_INDICATOR_ENABLED', 'true').lower() == 'true' %}checked{% endif %}>
+                        Show typing indicator while processing
+                    </label>
+                </div>
+            </section>
+
+            <!-- Advanced Settings -->
+            <section class="card">
+                <h2>Advanced Settings</h2>
+
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" name="use_pipeline"
+                               {% if config.get('USE_PIPELINE', 'true').lower() == 'true' %}checked{% endif %}>
+                        Enable 4-stage AI pipeline
+                    </label>
+                </div>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" name="debug_mode"
+                               {% if config.get('DEBUG_MODE', 'false').lower() == 'true' %}checked{% endif %}>
+                        Enable verbose debug logging
+                    </label>
+                </div>
+            </section>
+
+            <!-- Email Writing Styles -->
+            <section class="card">
+                <h2>Email Writing Styles</h2>
+                <p class="section-desc">Customize how the AI writes emails in professional and casual contexts.</p>
+
+                <div class="form-group">
+                    <label for="email_writing_style_professional">Professional Email Style</label>
+                    <textarea id="email_writing_style_professional" name="email_writing_style_professional" rows="8"
+                              placeholder="Instructions for professional/formal emails...">{{ config.get('EMAIL_WRITING_STYLE_PROFESSIONAL', '') }}</textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="email_writing_style_casual">Casual Email Style</label>
+                    <textarea id="email_writing_style_casual" name="email_writing_style_casual" rows="8"
+                              placeholder="Instructions for casual/friendly emails...">{{ config.get('EMAIL_WRITING_STYLE_CASUAL', '') }}</textarea>
                 </div>
             </section>
 
