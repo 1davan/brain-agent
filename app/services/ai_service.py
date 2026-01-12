@@ -235,10 +235,13 @@ IMPORTANT - TIMED REMINDERS: When user says "remind me at [TIME]" or specifies a
 - ALSO add to calendar_actions: {{"action": "create_event", "summary": "...", "start_time": "TIME", "end_time": null}}
 - Do NOT claim you created a calendar event unless you actually include it in calendar_actions
 
-IMPORTANT: Use ISO format for deadlines (YYYY-MM-DDTHH:MM:SS). Today is {current_date}.
+IMPORTANT: Use ISO format for deadlines (YYYY-MM-DDTHH:MM:SS).
+Today is {current_date} ({current_day_of_week}).
 - "this evening at 6" = today at 18:00
-- "tomorrow" = next day
-- "Monday" = calculate the actual date
+- "tomorrow" = {tomorrow_date}
+- For weekday names, calculate the NEXT occurrence:
+  - If today is {current_day_of_week} and user says "Friday", find the next Friday
+  - DOUBLE-CHECK your date calculation - off-by-one errors are common
 
 MEMORY ACTIONS (IMPORTANT - store facts about the user for future reference):
 When user mentions personal details, preferences, life events, or context you should remember:
@@ -338,13 +341,17 @@ BE HELPFUL. Don't just acknowledge - actually help solve the problem. Remember: 
             calendar_data = json.dumps(context.get('calendar_events', []), default=str)
             print(f"[DEBUG AI] Calendar events being sent to LLM: {calendar_data}")
 
+            now = datetime.now()
+            tomorrow = now + timedelta(days=1)
             raw_result = await chain.ainvoke({
                 "memories": json.dumps(context.get('memories', []), default=str),
                 "tasks": json.dumps(context.get('tasks', []), default=str),
                 "calendar_events": calendar_data,
                 "conversations": json.dumps(context.get('conversations', []), default=str),
                 "user_input": user_input,
-                "current_date": datetime.now().strftime("%Y-%m-%d")
+                "current_date": now.strftime("%Y-%m-%d"),
+                "current_day_of_week": now.strftime("%A"),
+                "tomorrow_date": tomorrow.strftime("%Y-%m-%d (%A)")
             })
 
             # Extract content from AIMessage
