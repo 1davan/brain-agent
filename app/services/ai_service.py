@@ -69,7 +69,17 @@ class AIService:
             "should_end_conversation": False
         }
 
-    def __init__(self, groq_api_key: str, model: str = "llama-3.3-70b-versatile"):
+    # Default email writing style - can be overridden via Config sheet
+    DEFAULT_EMAIL_STYLE = """Write professional but warm emails with proper formatting:
+- Use paragraphs separated by blank lines for readability
+- Start with a greeting (Hi [Name],)
+- Keep paragraphs short (2-3 sentences max)
+- End with a clear call-to-action or next step
+- Always include a sign-off (Best regards, Kind regards, Cheers, etc.)
+- Be genuine and conversational, not corporate or robotic
+- Match the tone to the relationship (more casual for colleagues, more formal for new contacts)"""
+
+    def __init__(self, groq_api_key: str, model: str = "llama-3.3-70b-versatile", email_style: str = None):
         """
         Initialize Groq AI service.
 
@@ -80,6 +90,7 @@ class AIService:
         """
         self.client = Groq(api_key=groq_api_key)
         self.model = model
+        self.email_style = email_style or self.DEFAULT_EMAIL_STYLE
 
         # LangChain integration for structured outputs - optimized for token limits
         self.llm = ChatGroq(
@@ -303,13 +314,7 @@ CREATE NEW NOTE:
 - {{"action": "create_note", "title": "New Note Title", "text": "Note content", "pinned": false}}
 
 EMAIL WRITING STYLE (use this voice for all email drafts):
-Write as a witty, self-aware person sharing with friends - not corporate, genuinely conversational.
-- Voice: First-person, informal. Contractions, start sentences with "And" or "But". Phrases like "I don't know why, but..." and "Anyway,". Educated but never pretentious.
-- Humor: Self-deprecating first. Find absurdity with deadpan delivery. Understatement often hits harder than exaggeration.
-- Language: Parenthetical asides (for jokes and clarifications). Em dashes for mid-thought interjections. British-ish expressions when natural (quite, bloody, smashing). Rhetorical questions to engage.
-- Structure: Short paragraphs. Single sentences for emphasis. No corporate buzzwords or sanitized language.
-- Closing: Warmth and invitation. Light sign-offs. Leave them feeling like they heard from a friend, not a robot.
-- Be honest, direct, real. Include the texture of actual life - the chaos, the absurdity, the genuine moments.
+{email_style}
 
 MEMORY CATEGORIES: personal | work | knowledge
 TASK PRIORITY: high (<24h) | medium (this week) | low (no deadline)
@@ -351,7 +356,8 @@ BE HELPFUL. Don't just acknowledge - actually help solve the problem. Remember: 
                 "user_input": user_input,
                 "current_date": now.strftime("%Y-%m-%d"),
                 "current_day_of_week": now.strftime("%A"),
-                "tomorrow_date": tomorrow.strftime("%Y-%m-%d (%A)")
+                "tomorrow_date": tomorrow.strftime("%Y-%m-%d (%A)"),
+                "email_style": self.email_style
             })
 
             # Extract content from AIMessage

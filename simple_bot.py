@@ -90,9 +90,14 @@ class SimpleTelegramBot:
             print("      SUCCESS: Google Sheets connected")
 
             print("[2/5] Initializing AI Service (llama-3.3-70b-versatile)...")
+            # Load email writing style from config if available
+            email_style = self.sheets_client.get_config_sync("email_writing_style")
+            if email_style:
+                print("      Using custom email style from Config sheet")
             self.ai_service = AIService(
                 groq_api_key=self.config.groq_api_key,
-                model=self.config.groq_model
+                model=self.config.groq_model,
+                email_style=email_style
             )
             print("      SUCCESS: AI service initialized")
 

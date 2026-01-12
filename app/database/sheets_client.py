@@ -222,8 +222,8 @@ class SheetsClient:
             print(f"Error getting all user settings: {e}")
             return {}
 
-    async def get_config(self, variable: str) -> Optional[str]:
-        """Get a global config variable"""
+    def get_config_sync(self, variable: str) -> Optional[str]:
+        """Get a global config variable (sync version for initialization)"""
         try:
             sheet = self.spreadsheet.worksheet("Config")
             data = sheet.get_all_records()
@@ -234,6 +234,10 @@ class SheetsClient:
         except Exception as e:
             print(f"Error getting config: {e}")
             return None
+
+    async def get_config(self, variable: str) -> Optional[str]:
+        """Get a global config variable"""
+        return self.get_config_sync(variable)
 
     async def get_all_config(self) -> Dict[str, str]:
         """Get all global config variables"""
