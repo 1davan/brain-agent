@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brain Agent - Configuration</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Brain Agent Configuration</h1>
+            <div class="header-actions">
+                <span class="status-badge status-{{ bot_status }}">
+                    Bot: {{ bot_status.upper() }}
+                </span>
+                <a href="{{ url_for('logout') }}" class="btn btn-secondary btn-small">Logout</a>
+            </div>
+        </header>
+
+        {% if message %}
+        <div class="alert alert-success">{{ message }}</div>
+        {% endif %}
+
+        {% if error %}
+        <div class="alert alert-error">{{ error }}</div>
+        {% endif %}
+
+        <form method="POST" id="configForm">
+            <!-- Bot Controls -->
+            <section class="card">
+                <h2>Bot Controls</h2>
+                <div class="button-group">
+                    <button type="submit" name="action" value="start" class="btn btn-success"
+                            {% if bot_status == 'running' %}disabled{% endif %}>
+                        Start Bot
+                    </button>
+                    <button type="submit" name="action" value="stop" class="btn btn-danger"
+                            {% if bot_status == 'stopped' %}disabled{% endif %}>
+                        Stop Bot
+                    </button>
+                    <button type="submit" name="action" value="restart" class="btn btn-warning"
+                            {% if bot_status == 'stopped' %}disabled{% endif %}>
+                        Restart Bot
+                    </button>
+                </div>
+            </section>
+
+            <!-- Required Keys -->
+            <section class="card">
+                <h2>Required API Keys</h2>
+                <p class="section-desc">These must be configured before the bot can start.</p>
+
+                <div class="form-group">
+                    <label for="telegram_token">Telegram Bot Token</label>
+                    <div class="input-with-button">
+                        <input type="text" id="telegram_token" name="telegram_token"
+                               value="{{ config.get('TELEGRAM_TOKEN', '') }}"
+                               placeholder="8260664859:AAGpDn...">
+                        <button type="button" class="btn btn-secondary btn-small" onclick="testTelegram()">Test</button>
+                    </div>
+                    <span class="test-result" id="telegram-result"></span>
+                </div>
+
+                <div class="form-group">
+                    <label for="groq_api_key">Groq API Key</label>
+                    <div class="input-with-button">
+                        <input type="text" id="groq_api_key" name="groq_api_key"
+                               value="{{ config.get('GROQ_API_KEY', '') }}"
+                               placeholder="gsk_PNkOvM0x8Zo...">
+                        <button type="button" class="btn btn-secondary btn-small" onclick="testGroq()">Test</button>
+                    </div>
+                    <span class="test-result" id="groq-result"></span>
+                </div>
+
+                <div class="form-group">
+                    <label for="spreadsheet_id">Google Spreadsheet ID</label>
+                    <input type="text" id="spreadsheet_id" name="spreadsheet_id"
+                           value="{{ config.get('SPREADSHEET_ID', '') }}"
+                           placeholder="14l7M7pcdiHffPTdggz4eiOVwJ5St6P3fHYyh5XZJALw">
+                    <small>Found in the Google Sheets URL after /d/</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="credentials_json">Google Service Account JSON</label>
+                    <div class="input-with-button" style="align-items: flex-start;">
+                        <textarea id="credentials_json" name="credentials_json" rows="6"
+                                  placeholder='Paste your service account JSON here...'>{{ creds_json }}</textarea>
+                        <button type="button" class="btn btn-secondary btn-small" onclick="testSheets()">Test</button>
+                    </div>
+                    <span class="test-result" id="sheets-result"></span>
+                    <small>Paste the entire contents of your service account JSON file</small>
+                </div>
+            </section>
+
+            <!-- Optional Services -->
+            <section class="card">
+                <h2>Optional Services</h2>
+                <p class="section-desc">These enable additional features but are not required.</p>
+
+                <div class="form-group">
+                    <label for="calendar_id">Google Calendar ID</label>
+                    <input type="text" id="calendar_id" name="calendar_id"
+                           value="{{ config.get('GOOGLE_CALENDAR_ID', '') }}"
+                           placeholder="primary or your.email@gmail.com">
+                    <small>Use "primary" for your main calendar, or the calendar email address</small>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="gmail_address">Gmail Address</label>
+                        <input type="email" id="gmail_address" name="gmail_address"
+                               value="{{ config.get('GMAIL_ADDRESS', '') }}"
+                               placeholder="your.email@gmail.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="gmail_app_password">Gmail App Password</label>
+                        <input type="password" id="gmail_app_password" name="gmail_app_password"
+                               value="{{ config.get('GMAIL_APP_PASSWORD', '') }}"
+                               placeholder="xxxx xxxx xxxx xxxx">
+                        <small>Generate at myaccount.google.com/apppasswords</small>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="keep_token">Google Keep Token</label>
+                    <input type="text" id="keep_token" name="keep_token"
+                           value="{{ config.get('GOOGLE_KEEP_TOKEN', '') }}"
+                           placeholder="Master token for Google Keep API">
+                    <small>Optional - for Google Keep note integration</small>
+                </div>
+            </section>
+
+            <!-- Bot Settings -->
+            <section class="card">
+                <h2>Bot Settings</h2>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="groq_model">AI Model</label>
+                        <select id="groq_model" name="groq_model">
+                            <option value="llama-3.3-70b-versatile" {% if config.get('GROQ_MODEL', 'llama-3.3-70b-versatile') == 'llama-3.3-70b-versatile' %}selected{% endif %}>
+                                llama-3.3-70b-versatile (Recommended)
+                            </option>
+                            <option value="llama-3.1-8b-instant" {% if config.get('GROQ_MODEL') == 'llama-3.1-8b-instant' %}selected{% endif %}>
+                                llama-3.1-8b-instant (Faster)
+                            </option>
+                            <option value="mixtral-8x7b-32768" {% if config.get('GROQ_MODEL') == 'mixtral-8x7b-32768' %}selected{% endif %}>
+                                mixtral-8x7b-32768 (Large Context)
+                            </option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="timezone">Timezone</label>
+                        <select id="timezone" name="timezone">
+                            <option value="Australia/Brisbane" {% if config.get('TIMEZONE', 'Australia/Brisbane') == 'Australia/Brisbane' %}selected{% endif %}>
+                                Australia/Brisbane
+                            </option>
+                            <option value="Australia/Sydney" {% if config.get('TIMEZONE') == 'Australia/Sydney' %}selected{% endif %}>
+                                Australia/Sydney
+                            </option>
+                            <option value="Australia/Melbourne" {% if config.get('TIMEZONE') == 'Australia/Melbourne' %}selected{% endif %}>
+                                Australia/Melbourne
+                            </option>
+                            <option value="UTC" {% if config.get('TIMEZONE') == 'UTC' %}selected{% endif %}>
+                                UTC
+                            </option>
+                            <option value="America/New_York" {% if config.get('TIMEZONE') == 'America/New_York' %}selected{% endif %}>
+                                America/New_York
+                            </option>
+                            <option value="Europe/London" {% if config.get('TIMEZONE') == 'Europe/London' %}selected{% endif %}>
+                                Europe/London
+                            </option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="checkin_hours">Check-in Hours (comma-separated)</label>
+                        <input type="text" id="checkin_hours" name="checkin_hours"
+                               value="{{ config.get('CHECKIN_HOURS', '10,14,18') }}"
+                               placeholder="10,14,18">
+                    </div>
+                    <div class="form-group">
+                        <label for="daily_summary_hour">Daily Summary Hour (24h)</label>
+                        <input type="number" id="daily_summary_hour" name="daily_summary_hour"
+                               value="{{ config.get('DAILY_SUMMARY_HOUR', '9') }}"
+                               min="0" max="23">
+                    </div>
+                </div>
+
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" name="use_pipeline"
+                               {% if config.get('USE_PIPELINE', 'false').lower() == 'true' %}checked{% endif %}>
+                        Enable 4-stage AI pipeline (experimental)
+                    </label>
+                </div>
+            </section>
+
+            <!-- Security -->
+            <section class="card">
+                <h2>Security</h2>
+                <div class="form-group">
+                    <label for="web_password">Web UI Password</label>
+                    <input type="password" id="web_password" name="web_password"
+                           value="{{ config.get('WEB_PASSWORD', '') }}"
+                           placeholder="Leave empty to keep current password">
+                    <small>Password required to access this configuration page</small>
+                </div>
+            </section>
+
+            <!-- Save Button -->
+            <div class="form-actions">
+                <button type="submit" name="action" value="save" class="btn btn-primary btn-large">
+                    Save Configuration
+                </button>
+            </div>
+        </form>
+
+        <!-- Log Viewer -->
+        <section class="card">
+            <h2>Bot Logs</h2>
+            <div class="log-controls">
+                <button type="button" class="btn btn-secondary btn-small" onclick="refreshLogs()">Refresh Logs</button>
+                <label>
+                    <input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()">
+                    Auto-refresh
+                </label>
+            </div>
+            <pre id="logViewer" class="log-viewer">Click "Refresh Logs" to view bot output...</pre>
+        </section>
+    </div>
+
+    <script>
+        let autoRefreshInterval = null;
+
+        function testTelegram() {
+            const token = document.getElementById('telegram_token').value;
+            const result = document.getElementById('telegram-result');
+            result.textContent = 'Testing...';
+            result.className = 'test-result';
+
+            fetch('/api/test/telegram', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({token: token})
+            })
+            .then(r => r.json())
+            .then(data => {
+                result.textContent = data.success ? data.message : data.error;
+                result.className = 'test-result ' + (data.success ? 'success' : 'error');
+            })
+            .catch(e => {
+                result.textContent = 'Test failed: ' + e;
+                result.className = 'test-result error';
+            });
+        }
+
+        function testGroq() {
+            const apiKey = document.getElementById('groq_api_key').value;
+            const result = document.getElementById('groq-result');
+            result.textContent = 'Testing...';
+            result.className = 'test-result';
+
+            fetch('/api/test/groq', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({api_key: apiKey})
+            })
+            .then(r => r.json())
+            .then(data => {
+                result.textContent = data.success ? data.message : data.error;
+                result.className = 'test-result ' + (data.success ? 'success' : 'error');
+            })
+            .catch(e => {
+                result.textContent = 'Test failed: ' + e;
+                result.className = 'test-result error';
+            });
+        }
+
+        function testSheets() {
+            const creds = document.getElementById('credentials_json').value;
+            const sheetId = document.getElementById('spreadsheet_id').value;
+            const result = document.getElementById('sheets-result');
+            result.textContent = 'Testing...';
+            result.className = 'test-result';
+
+            fetch('/api/test/sheets', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({credentials: creds, spreadsheet_id: sheetId})
+            })
+            .then(r => r.json())
+            .then(data => {
+                result.textContent = data.success ? data.message : data.error;
+                result.className = 'test-result ' + (data.success ? 'success' : 'error');
+            })
+            .catch(e => {
+                result.textContent = 'Test failed: ' + e;
+                result.className = 'test-result error';
+            });
+        }
+
+        function refreshLogs() {
+            fetch('/api/logs')
+            .then(r => r.json())
+            .then(data => {
+                const viewer = document.getElementById('logViewer');
+                if (data.logs && data.logs.length > 0) {
+                    viewer.textContent = data.logs.join('\n');
+                    viewer.scrollTop = viewer.scrollHeight;
+                } else {
+                    viewer.textContent = 'No logs available. Start the bot to see output.';
+                }
+            })
+            .catch(e => {
+                document.getElementById('logViewer').textContent = 'Error fetching logs: ' + e;
+            });
+        }
+
+        function toggleAutoRefresh() {
+            const checkbox = document.getElementById('autoRefresh');
+            if (checkbox.checked) {
+                refreshLogs();
+                autoRefreshInterval = setInterval(refreshLogs, 3000);
+            } else {
+                if (autoRefreshInterval) {
+                    clearInterval(autoRefreshInterval);
+                    autoRefreshInterval = null;
+                }
+            }
+        }
+
+        function updateStatus() {
+            fetch('/api/status')
+            .then(r => r.json())
+            .then(data => {
+                const badge = document.querySelector('.status-badge');
+                badge.textContent = 'Bot: ' + data.status.toUpperCase();
+                badge.className = 'status-badge status-' + data.status;
+            });
+        }
+
+        // Update status every 5 seconds
+        setInterval(updateStatus, 5000);
+    </script>
+</body>
+</html>

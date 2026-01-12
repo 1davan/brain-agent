@@ -36,5 +36,8 @@ nest-asyncio>=1.6.0
 pytz>=2024.1
 requests>=2.31.0
 
+# Web Configuration UI
+flask>=3.0.0
+
 # Google Keep (unofficial API)
 gkeepapi>=0.16.0
