@@ -69,17 +69,28 @@ class AIService:
             "should_end_conversation": False
         }
 
-    # Default email writing style - can be overridden via Config sheet
-    DEFAULT_EMAIL_STYLE = """Write professional but warm emails with proper formatting:
+    # Default professional email style - can be overridden via Config sheet
+    DEFAULT_EMAIL_STYLE_PROFESSIONAL = """Write professional but warm emails with proper formatting:
 - Use paragraphs separated by blank lines for readability
 - Start with a greeting (Hi [Name],)
 - Keep paragraphs short (2-3 sentences max)
 - End with a clear call-to-action or next step
 - Always include a sign-off (Best regards, Kind regards, Cheers, etc.)
 - Be genuine and conversational, not corporate or robotic
-- Match the tone to the relationship (more casual for colleagues, more formal for new contacts)"""
+- Professional but not stiff - sound like a competent colleague, not a form letter"""
 
-    def __init__(self, groq_api_key: str, model: str = "llama-3.3-70b-versatile", email_style: str = None):
+    # Default casual email style - can be overridden via Config sheet
+    DEFAULT_EMAIL_STYLE_CASUAL = """Write casual, friendly emails like you're writing to a mate:
+- Voice: First-person, informal. Use contractions, start sentences with "And" or "But". Phrases like "I don't know why, but..." and "Anyway,". Educated but never pretentious.
+- Humor: Self-deprecating first. Find absurdity with deadpan delivery. Understatement often hits harder than exaggeration.
+- Language: Parenthetical asides (for jokes and clarifications). Use dashes for mid-thought interjections. British-ish expressions when natural (quite, bloody, smashing). Rhetorical questions to engage.
+- Structure: Short paragraphs. Single sentences for emphasis. No corporate buzzwords or sanitized language.
+- Closing: Warmth and invitation. Light sign-offs (Cheers, Later, Talk soon). Leave them feeling like they heard from a friend, not a robot.
+- Be honest, direct, real. Include the texture of actual life - the chaos, the absurdity, the genuine moments.
+- Use paragraphs separated by blank lines for readability"""
+
+    def __init__(self, groq_api_key: str, model: str = "llama-3.3-70b-versatile",
+                 email_style_professional: str = None, email_style_casual: str = None):
         """
         Initialize Groq AI service.
 
@@ -90,7 +101,8 @@ class AIService:
         """
         self.client = Groq(api_key=groq_api_key)
         self.model = model
-        self.email_style = email_style or self.DEFAULT_EMAIL_STYLE
+        self.email_style_professional = email_style_professional or self.DEFAULT_EMAIL_STYLE_PROFESSIONAL
+        self.email_style_casual = email_style_casual or self.DEFAULT_EMAIL_STYLE_CASUAL
 
         # LangChain integration for structured outputs - optimized for token limits
         self.llm = ChatGroq(
@@ -313,8 +325,19 @@ VIEW NOTE CONTENT:
 CREATE NEW NOTE:
 - {{"action": "create_note", "title": "New Note Title", "text": "Note content", "pinned": false}}
 
-EMAIL WRITING STYLE (use this voice for all email drafts):
-{email_style}
+EMAIL WRITING STYLES - Choose based on context:
+
+PROFESSIONAL STYLE (use for: work emails, clients, formal requests, business matters, people you don't know well):
+{email_style_professional}
+
+CASUAL STYLE (use for: friends, close colleagues, personal matters, informal catch-ups, people you know well):
+{email_style_casual}
+
+CHOOSING THE RIGHT STYLE:
+- If user says "professional", "formal", "work", "client", "business" -> use PROFESSIONAL
+- If user says "casual", "friendly", "mate", "friend", "informal" -> use CASUAL
+- If unclear, look at the recipient and context to decide
+- Default to PROFESSIONAL for unknown recipients
 
 MEMORY CATEGORIES: personal | work | knowledge
 TASK PRIORITY: high (<24h) | medium (this week) | low (no deadline)
@@ -357,7 +380,8 @@ BE HELPFUL. Don't just acknowledge - actually help solve the problem. Remember: 
                 "current_date": now.strftime("%Y-%m-%d"),
                 "current_day_of_week": now.strftime("%A"),
                 "tomorrow_date": tomorrow.strftime("%Y-%m-%d (%A)"),
-                "email_style": self.email_style
+                "email_style_professional": self.email_style_professional,
+                "email_style_casual": self.email_style_casual
             })
 
             # Extract content from AIMessage
