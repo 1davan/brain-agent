@@ -612,6 +612,29 @@ Admin-editable configuration for the entire bot. Edit values directly in Google 
 |----------|---------|-------------|
 | email_require_confirmation | true | Require confirmation before sending |
 | email_default_sign_off | Best regards | Default email sign-off text |
+| email_writing_style_professional | (see below) | Writing style for work/formal emails |
+| email_writing_style_casual | (see below) | Writing style for friends/informal emails |
+
+**Email Style Selection:**
+The AI automatically chooses the appropriate style based on context:
+- **Professional**: Used when user says "professional", "formal", "work", "client", "business", or for unknown recipients
+- **Casual**: Used when user says "casual", "friendly", "mate", "friend", "informal", or for close colleagues/friends
+
+**Default Professional Style:**
+- Proper greeting (Hi [Name],)
+- Paragraphs separated by blank lines
+- Short paragraphs (2-3 sentences max)
+- Clear call-to-action or next step
+- Sign-off (Best regards, Kind regards, etc.)
+- Professional but warm tone
+
+**Default Casual Style:**
+- First-person, informal voice with contractions
+- Self-deprecating humor and deadpan delivery
+- Parenthetical asides and dashes for interjections
+- British-ish expressions when natural
+- Light sign-offs (Cheers, Later, Talk soon)
+- Honest, direct, genuine tone
 
 #### Calendar Settings
 | Variable | Default | Description |

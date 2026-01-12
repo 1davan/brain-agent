@@ -41,6 +41,8 @@ The bot will start and connect to Telegram.
 - Create email drafts via chat
 - Reply to existing email threads
 - Contact management from Google Sheets
+- Two writing styles: Professional (work/formal) and Casual (friends/informal)
+- AI auto-selects style based on context or user preference
 
 **Smart Conversation**
 - Context-aware responses
@@ -171,6 +173,32 @@ User: What's in my calendar tomorrow?
 Bot: You have 2 events tomorrow:
   - 09:00AM: Team standup
   - 02:00PM: Client meeting @ Conference Room B
+```
+
+### Email
+```
+User: Draft a professional email to Sarah about the project deadline
+Bot: I've created a draft email to Sarah:
+
+  Subject: Project Deadline Update
+
+  Hi Sarah,
+
+  I wanted to touch base about the upcoming project deadline...
+
+  Best regards
+
+User: Write a casual email to Mike about Friday drinks
+Bot: I've created a draft email to Mike:
+
+  Subject: Friday drinks?
+
+  Hey Mike,
+
+  So, Friday. Drinks. You in? I was thinking we could hit up
+  that new place on King Street...
+
+  Cheers
 ```
 
 ## Project Structure
