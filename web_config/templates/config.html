@@ -3,20 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Brain Agent - Configuration</title>
+    <title>Brain Agent - Dashboard</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>Brain Agent Configuration</h1>
+            <h1>Brain Agent</h1>
             <div class="header-actions">
+                <div class="user-selector">
+                    <label for="userSelect">User:</label>
+                    <select id="userSelect" onchange="onUserChange()">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
                 <span class="status-badge status-{{ bot_status }}">
                     Bot: {{ bot_status.upper() }}
                 </span>
                 <a href="{{ url_for('logout') }}" class="btn btn-secondary btn-small">Logout</a>
             </div>
         </header>
+
+        <!-- Tab Navigation -->
+        <nav class="tab-nav">
+            <button class="tab-btn active" data-tab="credentials">Credentials</button>
+            <button class="tab-btn" data-tab="memories">Memories</button>
+            <button class="tab-btn" data-tab="tasks">Tasks</button>
+            <button class="tab-btn" data-tab="conversations">Conversations</button>
+            <button class="tab-btn" data-tab="logs">Logs</button>
+        </nav>
 
         {% if message %}
         <div class="alert alert-success">{{ message }}</div>
@@ -26,163 +41,366 @@
         <div class="alert alert-error">{{ error }}</div>
         {% endif %}
 
-        <form method="POST" id="configForm">
-            <!-- Bot Controls -->
-            <section class="card">
-                <h2>Bot Controls</h2>
-                <div class="button-group">
-                    <button type="submit" name="action" value="start" class="btn btn-success"
-                            {% if bot_status == 'running' %}disabled{% endif %}>
-                        Start Bot
-                    </button>
-                    <button type="submit" name="action" value="stop" class="btn btn-danger"
-                            {% if bot_status == 'stopped' %}disabled{% endif %}>
-                        Stop Bot
-                    </button>
-                    <button type="submit" name="action" value="restart" class="btn btn-warning"
-                            {% if bot_status == 'stopped' %}disabled{% endif %}>
-                        Restart Bot
-                    </button>
-                </div>
-            </section>
+        <!-- Toast notification -->
+        <div id="toast" class="toast"></div>
 
-            <!-- Required Credentials -->
-            <section class="card">
-                <h2>Required Credentials</h2>
-                <p class="section-desc">API keys and secrets. All other settings are configured in the Google Sheet Config tab.</p>
-
-                <div class="form-group">
-                    <label for="telegram_token">Telegram Bot Token</label>
-                    <div class="input-with-button">
-                        <input type="text" id="telegram_token" name="telegram_token"
-                               value="{{ config.get('TELEGRAM_TOKEN', '') }}"
-                               placeholder="8260664859:AAGpDn...">
-                        <button type="button" class="btn btn-secondary btn-small" onclick="testTelegram()">Test</button>
+        <!-- ============================================================ -->
+        <!-- CREDENTIALS TAB -->
+        <!-- ============================================================ -->
+        <div id="tab-credentials" class="tab-content active">
+            <form method="POST" id="configForm">
+                <!-- Bot Controls -->
+                <section class="card">
+                    <h2>Bot Controls</h2>
+                    <div class="button-group">
+                        <button type="submit" name="action" value="start" class="btn btn-success"
+                                {% if bot_status == 'running' %}disabled{% endif %}>
+                            Start Bot
+                        </button>
+                        <button type="submit" name="action" value="stop" class="btn btn-danger"
+                                {% if bot_status == 'stopped' %}disabled{% endif %}>
+                            Stop Bot
+                        </button>
+                        <button type="submit" name="action" value="restart" class="btn btn-warning"
+                                {% if bot_status == 'stopped' %}disabled{% endif %}>
+                            Restart Bot
+                        </button>
                     </div>
-                    <span class="test-result" id="telegram-result"></span>
-                </div>
+                </section>
 
-                <div class="form-group">
-                    <label for="groq_api_key">Groq API Key</label>
-                    <div class="input-with-button">
-                        <input type="text" id="groq_api_key" name="groq_api_key"
-                               value="{{ config.get('GROQ_API_KEY', '') }}"
-                               placeholder="gsk_PNkOvM0x8Zo...">
-                        <button type="button" class="btn btn-secondary btn-small" onclick="testGroq()">Test</button>
-                    </div>
-                    <span class="test-result" id="groq-result"></span>
-                </div>
+                <!-- Required Credentials -->
+                <section class="card">
+                    <h2>Required Credentials</h2>
+                    <p class="section-desc">API keys and secrets. All other settings are configured in the Google Sheet Config tab.</p>
 
-                <div class="form-group">
-                    <label for="spreadsheet_id">Google Spreadsheet ID</label>
-                    <input type="text" id="spreadsheet_id" name="spreadsheet_id"
-                           value="{{ config.get('SPREADSHEET_ID', '') }}"
-                           placeholder="14l7M7pcdiHffPTdggz4eiOVwJ5St6P3fHYyh5XZJALw">
-                    <small>Found in the Google Sheets URL after /d/</small>
-                </div>
-
-                <div class="form-group">
-                    <label for="credentials_json">Google Service Account JSON</label>
-                    <div class="input-with-button" style="align-items: flex-start;">
-                        <textarea id="credentials_json" name="credentials_json" rows="6"
-                                  placeholder='Paste your service account JSON here...'>{{ creds_json }}</textarea>
-                        <button type="button" class="btn btn-secondary btn-small" onclick="testSheets()">Test</button>
-                    </div>
-                    <span class="test-result" id="sheets-result"></span>
-                    <small>Paste the entire contents of your service account JSON file</small>
-                </div>
-            </section>
-
-            <!-- Optional Service Credentials -->
-            <section class="card">
-                <h2>Optional Service Credentials</h2>
-                <p class="section-desc">Additional API credentials for extra features.</p>
-
-                <div class="form-group">
-                    <label for="calendar_id">Google Calendar ID</label>
-                    <input type="text" id="calendar_id" name="calendar_id"
-                           value="{{ config.get('GOOGLE_CALENDAR_ID', '') }}"
-                           placeholder="primary or your.email@gmail.com">
-                    <small>Use "primary" for your main calendar, or the calendar email address</small>
-                </div>
-
-                <div class="form-row">
                     <div class="form-group">
-                        <label for="gmail_address">Gmail Address</label>
-                        <input type="email" id="gmail_address" name="gmail_address"
-                               value="{{ config.get('GMAIL_ADDRESS', '') }}"
-                               placeholder="your.email@gmail.com">
+                        <label for="telegram_token">Telegram Bot Token</label>
+                        <div class="input-with-button">
+                            <input type="text" id="telegram_token" name="telegram_token"
+                                   value="{{ config.get('TELEGRAM_TOKEN', '') }}"
+                                   placeholder="8260664859:AAGpDn...">
+                            <button type="button" class="btn btn-secondary btn-small" onclick="testTelegram()">Test</button>
+                        </div>
+                        <span class="test-result" id="telegram-result"></span>
                     </div>
+
                     <div class="form-group">
-                        <label for="gmail_app_password">Gmail App Password</label>
-                        <input type="password" id="gmail_app_password" name="gmail_app_password"
-                               value="{{ config.get('GMAIL_APP_PASSWORD', '') }}"
-                               placeholder="xxxx xxxx xxxx xxxx">
-                        <small>Generate at myaccount.google.com/apppasswords</small>
+                        <label for="groq_api_key">Groq API Key</label>
+                        <div class="input-with-button">
+                            <input type="text" id="groq_api_key" name="groq_api_key"
+                                   value="{{ config.get('GROQ_API_KEY', '') }}"
+                                   placeholder="gsk_PNkOvM0x8Zo...">
+                            <button type="button" class="btn btn-secondary btn-small" onclick="testGroq()">Test</button>
+                        </div>
+                        <span class="test-result" id="groq-result"></span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="spreadsheet_id">Google Spreadsheet ID</label>
+                        <input type="text" id="spreadsheet_id" name="spreadsheet_id"
+                               value="{{ config.get('SPREADSHEET_ID', '') }}"
+                               placeholder="14l7M7pcdiHffPTdggz4eiOVwJ5St6P3fHYyh5XZJALw">
+                        <small>Found in the Google Sheets URL after /d/</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="credentials_json">Google Service Account JSON</label>
+                        <div class="input-with-button" style="align-items: flex-start;">
+                            <textarea id="credentials_json" name="credentials_json" rows="6"
+                                      placeholder='Paste your service account JSON here...'>{{ creds_json }}</textarea>
+                            <button type="button" class="btn btn-secondary btn-small" onclick="testSheets()">Test</button>
+                        </div>
+                        <span class="test-result" id="sheets-result"></span>
+                        <small>Paste the entire contents of your service account JSON file</small>
+                    </div>
+                </section>
+
+                <!-- Optional Service Credentials -->
+                <section class="card">
+                    <h2>Optional Service Credentials</h2>
+                    <p class="section-desc">Additional API credentials for extra features.</p>
+
+                    <div class="form-group">
+                        <label for="calendar_id">Google Calendar ID</label>
+                        <input type="text" id="calendar_id" name="calendar_id"
+                               value="{{ config.get('GOOGLE_CALENDAR_ID', '') }}"
+                               placeholder="primary or your.email@gmail.com">
+                        <small>Use "primary" for your main calendar, or the calendar email address</small>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="gmail_address">Gmail Address</label>
+                            <input type="email" id="gmail_address" name="gmail_address"
+                                   value="{{ config.get('GMAIL_ADDRESS', '') }}"
+                                   placeholder="your.email@gmail.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="gmail_app_password">Gmail App Password</label>
+                            <input type="password" id="gmail_app_password" name="gmail_app_password"
+                                   value="{{ config.get('GMAIL_APP_PASSWORD', '') }}"
+                                   placeholder="xxxx xxxx xxxx xxxx">
+                            <small>Generate at myaccount.google.com/apppasswords</small>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="keep_token">Google Keep Token</label>
+                        <input type="text" id="keep_token" name="keep_token"
+                               value="{{ config.get('GOOGLE_KEEP_TOKEN', '') }}"
+                               placeholder="Master token for Google Keep API">
+                        <small>Optional - for Google Keep note integration</small>
+                    </div>
+                </section>
+
+                <!-- Web UI Security -->
+                <section class="card">
+                    <h2>Web UI Security</h2>
+                    <div class="form-group">
+                        <label for="web_password">Web UI Password</label>
+                        <input type="password" id="web_password" name="web_password"
+                               value="{{ config.get('WEB_PASSWORD', '') }}"
+                               placeholder="Leave empty to keep current password">
+                        <small>Password required to access this configuration page</small>
+                    </div>
+                </section>
+
+                <!-- Save Button -->
+                <div class="form-actions">
+                    <button type="submit" name="action" value="save" class="btn btn-primary btn-large">
+                        Save Credentials
+                    </button>
+                </div>
+            </form>
+
+            <!-- Settings Info -->
+            <section class="card">
+                <h2>Bot Settings</h2>
+                <p class="section-desc">
+                    All behavioral settings (check-in times, email styles, context limits, etc.) are configured in the
+                    <strong>Config</strong> tab of your Google Sheet. Changes there take effect on bot restart.
+                </p>
+                <p>
+                    <a href="https://docs.google.com/spreadsheets/d/{{ config.get('SPREADSHEET_ID', '') }}/edit#gid=0"
+                       target="_blank" class="btn btn-secondary">
+                        Open Google Sheet
+                    </a>
+                </p>
+            </section>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- MEMORIES TAB -->
+        <!-- ============================================================ -->
+        <div id="tab-memories" class="tab-content">
+            <section class="card">
+                <div class="tab-header">
+                    <h2>Memories</h2>
+                    <div class="tab-actions">
+                        <select id="memoryCategory" onchange="loadMemories()">
+                            <option value="">All Categories</option>
+                            <option value="personal">Personal</option>
+                            <option value="work">Work</option>
+                            <option value="preferences">Preferences</option>
+                            <option value="knowledge">Knowledge</option>
+                            <option value="health">Health</option>
+                            <option value="finance">Finance</option>
+                            <option value="relationships">Relationships</option>
+                            <option value="goals">Goals</option>
+                            <option value="habits">Habits</option>
+                        </select>
+                        <input type="text" id="memorySearch" placeholder="Search..." onkeyup="debounceSearch(loadMemories)">
+                        <button class="btn btn-primary btn-small" onclick="showAddMemoryModal()">+ Add Memory</button>
                     </div>
                 </div>
-
-                <div class="form-group">
-                    <label for="keep_token">Google Keep Token</label>
-                    <input type="text" id="keep_token" name="keep_token"
-                           value="{{ config.get('GOOGLE_KEEP_TOKEN', '') }}"
-                           placeholder="Master token for Google Keep API">
-                    <small>Optional - for Google Keep note integration</small>
-                </div>
+                <div id="memoriesLoading" class="loading">Loading memories...</div>
+                <div id="memoriesList" class="data-list"></div>
             </section>
+        </div>
 
-            <!-- Web UI Security -->
+        <!-- ============================================================ -->
+        <!-- TASKS TAB -->
+        <!-- ============================================================ -->
+        <div id="tab-tasks" class="tab-content">
             <section class="card">
-                <h2>Web UI Security</h2>
-                <div class="form-group">
-                    <label for="web_password">Web UI Password</label>
-                    <input type="password" id="web_password" name="web_password"
-                           value="{{ config.get('WEB_PASSWORD', '') }}"
-                           placeholder="Leave empty to keep current password">
-                    <small>Password required to access this configuration page</small>
+                <div class="tab-header">
+                    <h2>Tasks</h2>
+                    <div class="tab-actions">
+                        <select id="taskStatus" onchange="loadTasks()">
+                            <option value="">All Status</option>
+                            <option value="pending">Pending</option>
+                            <option value="complete">Complete</option>
+                        </select>
+                        <select id="taskPriority" onchange="loadTasks()">
+                            <option value="">All Priority</option>
+                            <option value="critical">Critical</option>
+                            <option value="high">High</option>
+                            <option value="medium">Medium</option>
+                            <option value="low">Low</option>
+                        </select>
+                        <label class="checkbox-inline">
+                            <input type="checkbox" id="taskShowArchived" onchange="loadTasks()"> Archived
+                        </label>
+                        <input type="text" id="taskSearch" placeholder="Search..." onkeyup="debounceSearch(loadTasks)">
+                        <button class="btn btn-primary btn-small" onclick="showAddTaskModal()">+ Add Task</button>
+                    </div>
                 </div>
+                <div id="tasksLoading" class="loading">Loading tasks...</div>
+                <div id="tasksList" class="data-list"></div>
             </section>
+        </div>
 
-            <!-- Save Button -->
-            <div class="form-actions">
-                <button type="submit" name="action" value="save" class="btn btn-primary btn-large">
-                    Save Credentials
-                </button>
-            </div>
-        </form>
+        <!-- ============================================================ -->
+        <!-- CONVERSATIONS TAB -->
+        <!-- ============================================================ -->
+        <div id="tab-conversations" class="tab-content">
+            <section class="card">
+                <div class="tab-header">
+                    <h2>Conversations</h2>
+                    <div class="tab-actions">
+                        <select id="conversationSession" onchange="loadConversations()">
+                            <option value="">All Sessions</option>
+                        </select>
+                        <input type="text" id="conversationSearch" placeholder="Search messages..." onkeyup="debounceSearch(loadConversations)">
+                    </div>
+                </div>
+                <div id="conversationsLoading" class="loading">Loading conversations...</div>
+                <div id="conversationsList" class="conversation-list"></div>
+            </section>
+        </div>
 
-        <!-- Settings Info -->
-        <section class="card">
-            <h2>Bot Settings</h2>
-            <p class="section-desc">
-                All behavioral settings (check-in times, email styles, context limits, etc.) are configured in the
-                <strong>Config</strong> tab of your Google Sheet. Changes there take effect on bot restart.
-            </p>
-            <p>
-                <a href="https://docs.google.com/spreadsheets/d/{{ config.get('SPREADSHEET_ID', '') }}/edit#gid=0"
-                   target="_blank" class="btn btn-secondary">
-                    Open Google Sheet
-                </a>
-            </p>
-        </section>
-
-        <!-- Log Viewer -->
-        <section class="card">
-            <h2>Bot Logs</h2>
-            <div class="log-controls">
-                <button type="button" class="btn btn-secondary btn-small" onclick="refreshLogs()">Refresh Logs</button>
-                <label>
-                    <input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()">
-                    Auto-refresh
-                </label>
-            </div>
-            <pre id="logViewer" class="log-viewer">Click "Refresh Logs" to view bot output...</pre>
-        </section>
+        <!-- ============================================================ -->
+        <!-- LOGS TAB -->
+        <!-- ============================================================ -->
+        <div id="tab-logs" class="tab-content">
+            <section class="card">
+                <h2>Bot Logs</h2>
+                <div class="log-controls">
+                    <button type="button" class="btn btn-secondary btn-small" onclick="refreshLogs()">Refresh Logs</button>
+                    <label>
+                        <input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()">
+                        Auto-refresh
+                    </label>
+                </div>
+                <pre id="logViewer" class="log-viewer">Click "Refresh Logs" to view bot output...</pre>
+            </section>
+        </div>
     </div>
 
-    <script>
-        let autoRefreshInterval = null;
+    <!-- ============================================================ -->
+    <!-- ADD MEMORY MODAL -->
+    <!-- ============================================================ -->
+    <div id="memoryModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="memoryModalTitle">Add Memory</h3>
+                <button class="modal-close" onclick="closeModal('memoryModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="memoryEditKey">
+                <div class="form-group">
+                    <label>Category</label>
+                    <select id="memoryFormCategory">
+                        <option value="personal">Personal</option>
+                        <option value="work">Work</option>
+                        <option value="preferences">Preferences</option>
+                        <option value="knowledge" selected>Knowledge</option>
+                        <option value="health">Health</option>
+                        <option value="finance">Finance</option>
+                        <option value="relationships">Relationships</option>
+                        <option value="goals">Goals</option>
+                        <option value="habits">Habits</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Key (short identifier)</label>
+                    <input type="text" id="memoryFormKey" placeholder="e.g., favorite_color">
+                </div>
+                <div class="form-group">
+                    <label>Value (memory content)</label>
+                    <textarea id="memoryFormValue" rows="4" placeholder="What should be remembered..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Confidence: <span id="memoryConfidenceDisplay">0.8</span></label>
+                    <input type="range" id="memoryFormConfidence" min="0" max="100" value="80"
+                           oninput="document.getElementById('memoryConfidenceDisplay').textContent = (this.value/100).toFixed(2)">
+                </div>
+                <div class="form-group">
+                    <label>Tags (comma-separated)</label>
+                    <input type="text" id="memoryFormTags" placeholder="tag1, tag2, tag3">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('memoryModal')">Cancel</button>
+                <button class="btn btn-primary" onclick="saveMemory()">Save Memory</button>
+            </div>
+        </div>
+    </div>
 
+    <!-- ============================================================ -->
+    <!-- ADD TASK MODAL -->
+    <!-- ============================================================ -->
+    <div id="taskModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="taskModalTitle">Add Task</h3>
+                <button class="modal-close" onclick="closeModal('taskModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="taskEditId">
+                <div class="form-group">
+                    <label>Title</label>
+                    <input type="text" id="taskFormTitle" placeholder="Task title">
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="taskFormDescription" rows="3" placeholder="Task description..."></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Priority</label>
+                        <select id="taskFormPriority">
+                            <option value="low">Low</option>
+                            <option value="medium" selected>Medium</option>
+                            <option value="high">High</option>
+                            <option value="critical">Critical</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Deadline</label>
+                        <input type="datetime-local" id="taskFormDeadline">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Progress: <span id="taskProgressDisplay">0</span>%</label>
+                    <input type="range" id="taskFormProgress" min="0" max="100" value="0"
+                           oninput="document.getElementById('taskProgressDisplay').textContent = this.value">
+                </div>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="taskFormRecurring" onchange="toggleRecurringField()">
+                        Recurring task
+                    </label>
+                </div>
+                <div class="form-group" id="recurrenceGroup" style="display: none;">
+                    <label>Recurrence Pattern</label>
+                    <input type="text" id="taskFormRecurrence" placeholder="e.g., daily, weekly, every monday">
+                </div>
+                <div class="form-group">
+                    <label>Notes</label>
+                    <textarea id="taskFormNotes" rows="2" placeholder="Additional notes..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('taskModal')">Cancel</button>
+                <button class="btn btn-primary" onclick="saveTask()">Save Task</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+    <script>
+        // Credential testing functions (kept inline for form context)
         function testTelegram() {
             const token = document.getElementById('telegram_token').value;
             const result = document.getElementById('telegram-result');
@@ -249,49 +467,6 @@
                 result.className = 'test-result error';
             });
         }
-
-        function refreshLogs() {
-            fetch('/api/logs')
-            .then(r => r.json())
-            .then(data => {
-                const viewer = document.getElementById('logViewer');
-                if (data.logs && data.logs.length > 0) {
-                    viewer.textContent = data.logs.join('\n');
-                    viewer.scrollTop = viewer.scrollHeight;
-                } else {
-                    viewer.textContent = 'No logs available. Start the bot to see output.';
-                }
-            })
-            .catch(e => {
-                document.getElementById('logViewer').textContent = 'Error fetching logs: ' + e;
-            });
-        }
-
-        function toggleAutoRefresh() {
-            const checkbox = document.getElementById('autoRefresh');
-            if (checkbox.checked) {
-                refreshLogs();
-                autoRefreshInterval = setInterval(refreshLogs, 3000);
-            } else {
-                if (autoRefreshInterval) {
-                    clearInterval(autoRefreshInterval);
-                    autoRefreshInterval = null;
-                }
-            }
-        }
-
-        function updateStatus() {
-            fetch('/api/status')
-            .then(r => r.json())
-            .then(data => {
-                const badge = document.querySelector('.status-badge');
-                badge.textContent = 'Bot: ' + data.status.toUpperCase();
-                badge.className = 'status-badge status-' + data.status;
-            });
-        }
-
-        // Update status every 5 seconds
-        setInterval(updateStatus, 5000);
     </script>
 </body>
 </html>

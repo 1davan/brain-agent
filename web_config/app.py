@@ -1,19 +1,20 @@
 """
-Flask web application for Brain Agent configuration.
-Provides a web UI to configure API keys and settings before starting the bot.
+Flask web application for Brain Agent configuration and data management.
+Provides a web UI to configure credentials, manage bot process, and view/edit data.
 """
 
 import os
 import sys
 import json
 import subprocess
-import signal
 import threading
 import time
+import asyncio
 from functools import wraps
 from pathlib import Path
+from datetime import datetime
 
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, Response
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -30,7 +31,47 @@ MAX_LOG_LINES = 200
 BASE_DIR = Path(__file__).parent.parent
 ENV_FILE = BASE_DIR / ".env"
 CREDENTIALS_FILE = BASE_DIR / "credentials.json"
-DEFAULT_PASSWORD = "brainagent2024"  # Change this or set WEB_PASSWORD in .env
+DEFAULT_PASSWORD = "brainagent2024"
+
+# Sheets client (initialized lazily)
+_sheets_client = None
+
+
+def get_sheets_client():
+    """Get or create SheetsClient instance."""
+    global _sheets_client
+    if _sheets_client is None:
+        env_config = load_env()
+        creds_path = env_config.get("GOOGLE_SHEETS_CREDENTIALS", "credentials.json")
+        spreadsheet_id = env_config.get("SPREADSHEET_ID", "")
+
+        if not spreadsheet_id:
+            return None
+
+        # Handle relative path
+        if not os.path.isabs(creds_path):
+            creds_path = str(BASE_DIR / creds_path)
+
+        if not os.path.exists(creds_path):
+            return None
+
+        try:
+            from app.database.sheets_client import SheetsClient
+            _sheets_client = SheetsClient(creds_path, spreadsheet_id)
+        except Exception as e:
+            print(f"Failed to initialize SheetsClient: {e}")
+            return None
+    return _sheets_client
+
+
+def run_async(coro):
+    """Run async coroutine in sync context."""
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
 
 
 def get_password():
@@ -71,7 +112,6 @@ def save_env(config):
     lines = []
     for key, value in config.items():
         if value:
-            # Quote values that contain spaces or special chars
             if " " in str(value) or "'" in str(value):
                 lines.append(f'{key}="{value}"')
             else:
@@ -84,7 +124,6 @@ def save_env(config):
 def save_credentials_json(json_content):
     """Save Google credentials JSON to file."""
     try:
-        # Validate JSON
         parsed = json.loads(json_content)
         with open(CREDENTIALS_FILE, "w") as f:
             json.dump(parsed, f, indent=2)
@@ -98,7 +137,6 @@ def get_bot_status():
     global bot_process
     if bot_process is None:
         return "stopped"
-
     poll = bot_process.poll()
     if poll is None:
         return "running"
@@ -141,7 +179,6 @@ def start_bot():
             cwd=str(BASE_DIR)
         )
 
-        # Start thread to read output
         output_thread = threading.Thread(target=read_bot_output, args=(bot_process,), daemon=True)
         output_thread.start()
 
@@ -171,7 +208,9 @@ def stop_bot():
         return False, f"Failed to stop bot: {e}"
 
 
-# Routes
+# ============================================================================
+# PAGE ROUTES
+# ============================================================================
 
 @app.route("/")
 def index():
@@ -214,23 +253,18 @@ def config():
         action = request.form.get("action")
 
         if action == "save":
-            # Only save credentials - all other settings come from Google Sheet
             new_config = {
-                # Required credentials
                 "TELEGRAM_TOKEN": request.form.get("telegram_token", "").strip(),
                 "GROQ_API_KEY": request.form.get("groq_api_key", "").strip(),
                 "SPREADSHEET_ID": request.form.get("spreadsheet_id", "").strip(),
                 "GOOGLE_SHEETS_CREDENTIALS": "credentials.json",
-                # Optional service credentials
                 "GOOGLE_CALENDAR_ID": request.form.get("calendar_id", "").strip() or "primary",
                 "GMAIL_ADDRESS": request.form.get("gmail_address", "").strip(),
                 "GMAIL_APP_PASSWORD": request.form.get("gmail_app_password", "").strip(),
                 "GOOGLE_KEEP_TOKEN": request.form.get("keep_token", "").strip(),
-                # Web UI password
                 "WEB_PASSWORD": request.form.get("web_password", "").strip() or DEFAULT_PASSWORD,
             }
 
-            # Save credentials JSON if provided
             creds_json = request.form.get("credentials_json", "").strip()
             if creds_json:
                 success, err = save_credentials_json(creds_json)
@@ -239,6 +273,9 @@ def config():
 
             if not error:
                 save_env(new_config)
+                # Reset sheets client to pick up new credentials
+                global _sheets_client
+                _sheets_client = None
                 message = "Configuration saved successfully"
 
         elif action == "start":
@@ -264,10 +301,8 @@ def config():
             else:
                 error = msg
 
-    # Load current config
     current_config = load_env()
 
-    # Load credentials JSON if exists
     creds_json = ""
     if CREDENTIALS_FILE.exists():
         try:
@@ -286,6 +321,10 @@ def config():
     )
 
 
+# ============================================================================
+# BOT STATUS & LOG APIS
+# ============================================================================
+
 @app.route("/api/status")
 @login_required
 def api_status():
@@ -301,9 +340,13 @@ def api_status():
 def api_logs():
     """Get bot logs as JSON."""
     return jsonify({
-        "logs": bot_log_lines[-50:]  # Last 50 lines
+        "logs": bot_log_lines[-50:]
     })
 
+
+# ============================================================================
+# CONNECTION TEST APIS
+# ============================================================================
 
 @app.route("/api/test/telegram", methods=["POST"])
 @login_required
@@ -377,6 +420,469 @@ def test_sheets():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
+
+# ============================================================================
+# USERS API
+# ============================================================================
+
+@app.route("/api/users")
+@login_required
+def api_users():
+    """Get list of users from Users sheet."""
+    client = get_sheets_client()
+    if not client:
+        return jsonify({"success": False, "error": "Sheets client not configured"})
+
+    try:
+        df = run_async(client.get_sheet_data("Users"))
+        users = []
+        for _, row in df.iterrows():
+            users.append({
+                "user_id": str(row.get("user_id", "")),
+                "username": str(row.get("username", "")),
+                "chat_id": str(row.get("chat_id", "")),
+                "last_active": str(row.get("last_active", ""))
+            })
+        return jsonify({"success": True, "users": users})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+# ============================================================================
+# MEMORIES API
+# ============================================================================
+
+@app.route("/api/memories")
+@login_required
+def api_memories_list():
+    """Get memories for a user."""
+    user_id = request.args.get("user_id", "")
+    category = request.args.get("category", "")
+    search = request.args.get("search", "").lower()
+
+    client = get_sheets_client()
+    if not client:
+        return jsonify({"success": False, "error": "Sheets client not configured"})
+
+    try:
+        df = run_async(client.get_sheet_data("Memories", user_id if user_id else None))
+        memories = []
+        for _, row in df.iterrows():
+            memory = {
+                "user_id": str(row.get("user_id", "")),
+                "category": str(row.get("category", "")),
+                "key": str(row.get("key", "")),
+                "value": str(row.get("value", "")),
+                "confidence": float(row.get("confidence", 0.5)) if row.get("confidence") else 0.5,
+                "tags": str(row.get("tags", "[]")),
+                "timestamp": str(row.get("timestamp", ""))
+            }
+
+            # Apply filters
+            if category and memory["category"] != category:
+                continue
+            if search and search not in memory["key"].lower() and search not in memory["value"].lower():
+                continue
+
+            memories.append(memory)
+
+        return jsonify({"success": True, "memories": memories})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/memories", methods=["POST"])
+@login_required
+def api_memories_create():
+    """Create a new memory."""
+    data = request.json
+    client = get_sheets_client()
+    if not client:
+        return jsonify({"success": False, "error": "Sheets client not configured"})
+
+    try:
+        now = datetime.now().isoformat()
+        memory_data = {
+            "user_id": data.get("user_id", ""),
+            "category": data.get("category", "knowledge"),
+            "key": data.get("key", ""),
+            "value": data.get("value", ""),
+            "embedding": "",  # Will be generated by bot if needed
+            "timestamp": now,
+            "confidence": str(data.get("confidence", 0.8)),
+            "tags": json.dumps(data.get("tags", []))
+        }
+        run_async(client.append_row("Memories", memory_data))
+        return jsonify({"success": True, "message": "Memory created"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/memories/<key>", methods=["PUT"])
+@login_required
+def api_memories_update(key):
+    """Update a memory."""
+    data = request.json
+    user_id = data.get("user_id", "")
+    client = get_sheets_client()
+    if not client:
+        return jsonify({"success": False, "error": "Sheets client not configured"})
+
+    try:
+        row_idx = run_async(client.find_row_by_id("Memories", user_id, key))
+        if not row_idx:
+            return jsonify({"success": False, "error": "Memory not found"})
+
+        update_data = {}
+        if "category" in data:
+            update_data["category"] = data["category"]
+        if "value" in data:
+            update_data["value"] = data["value"]
+        if "confidence" in data:
+            update_data["confidence"] = str(data["confidence"])
+        if "tags" in data:
+            update_data["tags"] = json.dumps(data["tags"]) if isinstance(data["tags"], list) else data["tags"]
+        if "key" in data and data["key"] != key:
+            update_data["key"] = data["key"]
+
+        if update_data:
+            run_async(client.update_row("Memories", row_idx, update_data))
+
+        return jsonify({"success": True, "message": "Memory updated"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/memories/<key>", methods=["DELETE"])
+@login_required
+def api_memories_delete(key):
+    """Archive a memory (soft delete)."""
+    user_id = request.args.get("user_id", "")
+    client = get_sheets_client()
+    if not client:
+        return jsonify({"success": False, "error": "Sheets client not configured"})
+
+    try:
+        # Get the memory data first
+        df = run_async(client.get_sheet_data("Memories", user_id))
+        memory_row = df[df["key"].astype(str) == str(key)]
+
+        if memory_row.empty:
+            return jsonify({"success": False, "error": "Memory not found"})
+
+        # Archive it
+        now = datetime.now().isoformat()
+        archive_data = {
+            "user_id": user_id,
+            "original_sheet": "Memories",
+            "content": memory_row.iloc[0].to_json(),
+            "archived_at": now,
+            "reason": "deleted_via_ui"
+        }
+        run_async(client.append_row("Archive", archive_data))
+
+        # Delete from Memories
+        row_idx = run_async(client.find_row_by_id("Memories", user_id, key))
+        if row_idx:
+            run_async(client.delete_row("Memories", row_idx))
+
+        return jsonify({"success": True, "message": "Memory archived"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+# ============================================================================
+# TASKS API
+# ============================================================================
+
+@app.route("/api/tasks")
+@login_required
+def api_tasks_list():
+    """Get tasks for a user."""
+    user_id = request.args.get("user_id", "")
+    status = request.args.get("status", "")
+    priority = request.args.get("priority", "")
+    show_archived = request.args.get("archived", "false").lower() == "true"
+    search = request.args.get("search", "").lower()
+
+    client = get_sheets_client()
+    if not client:
+        return jsonify({"success": False, "error": "Sheets client not configured"})
+
+    try:
+        df = run_async(client.get_sheet_data("Tasks", user_id if user_id else None))
+        tasks = []
+        for _, row in df.iterrows():
+            task = {
+                "user_id": str(row.get("user_id", "")),
+                "task_id": str(row.get("task_id", "")),
+                "title": str(row.get("title", "")),
+                "description": str(row.get("description", "")),
+                "priority": str(row.get("priority", "medium")),
+                "status": str(row.get("status", "pending")),
+                "deadline": str(row.get("deadline", "")),
+                "created_at": str(row.get("created_at", "")),
+                "updated_at": str(row.get("updated_at", "")),
+                "notes": str(row.get("notes", "")),
+                "progress_percent": int(row.get("progress_percent", 0)) if row.get("progress_percent") else 0,
+                "is_recurring": str(row.get("is_recurring", "false")).lower() == "true",
+                "recurrence_pattern": str(row.get("recurrence_pattern", "")),
+                "archived": str(row.get("archived", "false")).lower() == "true"
+            }
+
+            # Apply filters
+            if status and task["status"] != status:
+                continue
+            if priority and task["priority"] != priority:
+                continue
+            if not show_archived and task["archived"]:
+                continue
+            if search and search not in task["title"].lower() and search not in task["description"].lower():
+                continue
+
+            tasks.append(task)
+
+        # Sort by priority and deadline
+        priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        tasks.sort(key=lambda t: (priority_order.get(t["priority"], 2), t["deadline"] or "9999"))
+
+        return jsonify({"success": True, "tasks": tasks})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/tasks", methods=["POST"])
+@login_required
+def api_tasks_create():
+    """Create a new task."""
+    data = request.json
+    client = get_sheets_client()
+    if not client:
+        return jsonify({"success": False, "error": "Sheets client not configured"})
+
+    try:
+        import uuid
+        now = datetime.now().isoformat()
+        user_id = data.get("user_id", "")
+        task_id = f"task_{user_id}_{uuid.uuid4().hex[:8]}"
+
+        task_data = {
+            "user_id": user_id,
+            "task_id": task_id,
+            "title": data.get("title", ""),
+            "description": data.get("description", ""),
+            "priority": data.get("priority", "medium"),
+            "status": "pending",
+            "deadline": data.get("deadline", ""),
+            "created_at": now,
+            "updated_at": now,
+            "dependencies": "[]",
+            "notes": "",
+            "is_recurring": str(data.get("is_recurring", False)).lower(),
+            "recurrence_pattern": data.get("recurrence_pattern", ""),
+            "recurrence_end_date": "",
+            "parent_task_id": "",
+            "progress_percent": "0",
+            "last_discussed": "",
+            "completed_at": "",
+            "archived": "false"
+        }
+        run_async(client.append_row("Tasks", task_data))
+        return jsonify({"success": True, "message": "Task created", "task_id": task_id})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/tasks/<task_id>", methods=["PUT"])
+@login_required
+def api_tasks_update(task_id):
+    """Update a task."""
+    data = request.json
+    user_id = data.get("user_id", "")
+    client = get_sheets_client()
+    if not client:
+        return jsonify({"success": False, "error": "Sheets client not configured"})
+
+    try:
+        row_idx = run_async(client.find_row_by_id("Tasks", user_id, task_id))
+        if not row_idx:
+            return jsonify({"success": False, "error": "Task not found"})
+
+        now = datetime.now().isoformat()
+        update_data = {"updated_at": now}
+
+        allowed_fields = ["title", "description", "priority", "status", "deadline",
+                         "notes", "progress_percent", "is_recurring", "recurrence_pattern", "archived"]
+        for field in allowed_fields:
+            if field in data:
+                value = data[field]
+                if field in ["is_recurring", "archived"]:
+                    value = str(value).lower()
+                elif field == "progress_percent":
+                    value = str(int(value))
+                update_data[field] = value
+
+        # If completing task, set completed_at
+        if data.get("status") == "complete":
+            update_data["completed_at"] = now
+            update_data["progress_percent"] = "100"
+
+        run_async(client.update_row("Tasks", row_idx, update_data))
+        return jsonify({"success": True, "message": "Task updated"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/tasks/<task_id>/complete", methods=["POST"])
+@login_required
+def api_tasks_complete(task_id):
+    """Quick complete a task."""
+    data = request.json
+    user_id = data.get("user_id", "")
+    client = get_sheets_client()
+    if not client:
+        return jsonify({"success": False, "error": "Sheets client not configured"})
+
+    try:
+        row_idx = run_async(client.find_row_by_id("Tasks", user_id, task_id))
+        if not row_idx:
+            return jsonify({"success": False, "error": "Task not found"})
+
+        now = datetime.now().isoformat()
+        update_data = {
+            "status": "complete",
+            "completed_at": now,
+            "progress_percent": "100",
+            "updated_at": now
+        }
+        run_async(client.update_row("Tasks", row_idx, update_data))
+        return jsonify({"success": True, "message": "Task completed"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/tasks/<task_id>", methods=["DELETE"])
+@login_required
+def api_tasks_delete(task_id):
+    """Archive a task (soft delete)."""
+    user_id = request.args.get("user_id", "")
+    client = get_sheets_client()
+    if not client:
+        return jsonify({"success": False, "error": "Sheets client not configured"})
+
+    try:
+        row_idx = run_async(client.find_row_by_id("Tasks", user_id, task_id))
+        if not row_idx:
+            return jsonify({"success": False, "error": "Task not found"})
+
+        now = datetime.now().isoformat()
+        run_async(client.update_row("Tasks", row_idx, {"archived": "true", "updated_at": now}))
+        return jsonify({"success": True, "message": "Task archived"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+# ============================================================================
+# CONVERSATIONS API
+# ============================================================================
+
+@app.route("/api/conversations")
+@login_required
+def api_conversations_list():
+    """Get conversations for a user."""
+    user_id = request.args.get("user_id", "")
+    session_id = request.args.get("session_id", "")
+    search = request.args.get("search", "").lower()
+    limit = int(request.args.get("limit", 100))
+
+    client = get_sheets_client()
+    if not client:
+        return jsonify({"success": False, "error": "Sheets client not configured"})
+
+    try:
+        df = run_async(client.get_sheet_data("Conversations", user_id if user_id else None))
+        conversations = []
+        for _, row in df.iterrows():
+            conv = {
+                "user_id": str(row.get("user_id", "")),
+                "session_id": str(row.get("session_id", "")),
+                "message_type": str(row.get("message_type", "")),
+                "content": str(row.get("content", "")),
+                "timestamp": str(row.get("timestamp", "")),
+                "intent": str(row.get("intent", "")),
+                "entities": str(row.get("entities", "{}"))
+            }
+
+            # Apply filters
+            if session_id and conv["session_id"] != session_id:
+                continue
+            if search and search not in conv["content"].lower():
+                continue
+
+            conversations.append(conv)
+
+        # Sort by timestamp descending and limit
+        conversations.sort(key=lambda c: c["timestamp"], reverse=True)
+        conversations = conversations[:limit]
+
+        # Get unique sessions for filter dropdown
+        sessions = list(set(c["session_id"] for c in conversations if c["session_id"]))
+
+        return jsonify({"success": True, "conversations": conversations, "sessions": sessions})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+# ============================================================================
+# CONFIG API
+# ============================================================================
+
+@app.route("/api/config")
+@login_required
+def api_config_list():
+    """Get all config variables."""
+    client = get_sheets_client()
+    if not client:
+        return jsonify({"success": False, "error": "Sheets client not configured"})
+
+    try:
+        config = run_async(client.get_all_config())
+        return jsonify({"success": True, "config": config})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/config/<variable>", methods=["PUT"])
+@login_required
+def api_config_update(variable):
+    """Update a config variable."""
+    data = request.json
+    value = data.get("value", "")
+    client = get_sheets_client()
+    if not client:
+        return jsonify({"success": False, "error": "Sheets client not configured"})
+
+    try:
+        # Find the row in Config sheet
+        sheet = client.spreadsheet.worksheet("Config")
+        all_data = sheet.get_all_records()
+
+        for idx, row in enumerate(all_data):
+            if str(row.get("variable", "")) == variable:
+                # Update value column (column B, index 2)
+                sheet.update_cell(idx + 2, 2, str(value))
+                return jsonify({"success": True, "message": "Config updated"})
+
+        # If not found, create new
+        sheet.append_row([variable, str(value), "", "string"])
+        return jsonify({"success": True, "message": "Config created"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+# ============================================================================
+# SERVER
+# ============================================================================
 
 def run_server(host="0.0.0.0", port=5000, debug=False):
     """Run the Flask server."""
