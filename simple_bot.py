@@ -1516,36 +1516,52 @@ COMMANDS:
 
     def _proactive_loop(self):
         """Background loop for proactive features"""
+        print(f"[PROACTIVE] Loop started at {datetime.now(BRISBANE_TZ).strftime('%H:%M:%S')}")
+        print(f"[PROACTIVE] Check-in hours: {self.default_checkin_hours}")
+        print(f"[PROACTIVE] Daily summary hour: {self.daily_summary_hour}")
+
+        last_checkin_hour = None  # Track the last hour we sent check-ins
+        last_summary_date = None  # Track the last date we sent summaries
+
         while True:
             try:
                 now = datetime.now(BRISBANE_TZ)
+                current_hour = now.hour
+                current_date = now.date()
 
-                # Check every 5 minutes
-                time.sleep(300)
-
-                # Daily summary (configurable hour, default 9 AM)
-                if now.hour == self.daily_summary_hour and now.minute < 5:
+                # Daily summary (once per day at configured hour)
+                if current_hour == self.daily_summary_hour and last_summary_date != current_date:
+                    print(f"[PROACTIVE] Triggering daily summaries at {now.strftime('%H:%M')}")
                     self._send_daily_summaries()
+                    last_summary_date = current_date
 
-                # Proactive task check-ins (checked per-user inside the method)
-                if now.minute < 5:
+                # Proactive task check-ins (once per configured hour)
+                # Only trigger if current hour is in check-in hours and we haven't sent this hour yet
+                if current_hour in self.default_checkin_hours and last_checkin_hour != current_hour:
+                    print(f"[PROACTIVE] Triggering task check-ins at {now.strftime('%H:%M')} (hour {current_hour})")
                     self._send_task_checkins()
+                    last_checkin_hour = current_hour
 
-                # Check for upcoming deadlines
+                # Check for upcoming deadlines (every cycle)
                 self._check_upcoming_deadlines()
 
                 # Handle recurring tasks - create next occurrence when completed
                 self._process_recurring_tasks()
 
-                # Auto-archive old completed tasks (check once per hour at minute 30)
-                if now.minute >= 30 and now.minute < 35:
+                # Auto-archive old completed tasks (check once per hour at minute 30-35)
+                if 30 <= now.minute < 35:
                     self._auto_archive_tasks()
 
-                # Clean up expired task discussion sessions (5 min timeout)
+                # Clean up expired task discussion sessions
                 self._cleanup_expired_sessions()
 
             except Exception as e:
-                print(f"Proactive loop error: {e}")
+                print(f"[PROACTIVE] Loop error: {e}")
+                import traceback
+                traceback.print_exc()
+
+            # Sleep at the END of the loop - check every minute for more responsive check-ins
+            time.sleep(60)
 
     def _send_daily_summaries(self):
         """Send daily task and calendar summaries to known users"""
@@ -1637,13 +1653,17 @@ COMMANDS:
         today = now.date()
         current_hour = now.hour
 
+        print(f"[CHECK-IN] Starting check-ins at {now.strftime('%H:%M')} for {len(self.known_users)} users")
+
         for user_id, chat_id in self.known_users:
             try:
                 # Get user's configured check-in hours (or default)
                 user_hours = self.user_checkin_hours.get(user_id, self.default_checkin_hours)
+                print(f"[CHECK-IN] User {user_id}: hours={user_hours}, current_hour={current_hour}")
 
                 # Skip if current hour is not in user's check-in schedule
                 if current_hour not in user_hours:
+                    print(f"[CHECK-IN] User {user_id}: Skipping - not in user's check-in hours")
                     continue
 
                 # Check if we already sent a check-in at this hour today
@@ -1651,11 +1671,14 @@ COMMANDS:
                 if last_checkin:
                     last_date, last_hour = last_checkin
                     if last_date == today and last_hour == current_hour:
+                        print(f"[CHECK-IN] User {user_id}: Skipping - already sent check-in this hour")
                         continue
 
                 # Get a task to check in about
+                print(f"[CHECK-IN] User {user_id}: Looking for tasks to check in about...")
                 tasks = self._get_tasks_for_checkin_sync(user_id)
                 if not tasks:
+                    print(f"[CHECK-IN] User {user_id}: No pending tasks found for check-in")
                     continue
 
                 task = tasks[0]
