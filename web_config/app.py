@@ -946,7 +946,15 @@ def api_config_update(variable):
 # ============================================================================
 
 def run_server(host="0.0.0.0", port=5000, debug=False):
-    """Run the Flask server."""
+    """Run the Flask server with auto-start bot."""
+    # Auto-start the bot when the server starts
+    print("[SERVER] Auto-starting bot...")
+    success, msg = start_bot()
+    if success:
+        print(f"[SERVER] Bot auto-started successfully")
+    else:
+        print(f"[SERVER] Bot auto-start failed: {msg}")
+
     app.run(host=host, port=port, debug=debug, threaded=True)
 
 
