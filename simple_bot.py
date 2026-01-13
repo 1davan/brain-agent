@@ -1226,8 +1226,14 @@ Ready to assist you!"""
             if not self.calendar_service:
                 return "Calendar not configured. Enable Google Calendar API and share your calendar with the service account."
 
+            # Check if calendar is enabled for this user
+            if not self._is_calendar_enabled(user_id):
+                return "Calendar is not enabled for your account. Ask the admin to enable it in the web UI."
+
             try:
-                events = self._get_upcoming_events_sync(days=7)
+                # Get user-specific calendar ID if set
+                user_calendar_id = self._get_user_calendar_id(user_id)
+                events = self._get_upcoming_events_sync(days=7, calendar_id=user_calendar_id if user_calendar_id else None)
                 if not events:
                     return "No upcoming events in the next 7 days."
 
@@ -1424,8 +1430,8 @@ CONFIGURE:
 
         return None  # Not a recognized command, process normally
 
-    def _get_upcoming_events_sync(self, days: int = 7):
-        """Get upcoming calendar events synchronously"""
+    def _get_upcoming_events_sync(self, days: int = 7, calendar_id: str = None):
+        """Get upcoming calendar events synchronously. Optionally use a specific calendar_id."""
         if not self.calendar_service:
             return []
 
@@ -1437,7 +1443,16 @@ CONFIGURE:
         asyncio.set_event_loop(loop)
         try:
             async def get_events():
-                return await self.calendar_service.get_upcoming_events(max_results=10, days_ahead=days)
+                # If a specific calendar_id is provided, temporarily switch to it
+                if calendar_id:
+                    original_calendar_id = self.calendar_service.calendar_id
+                    self.calendar_service.calendar_id = calendar_id
+                    try:
+                        return await self.calendar_service.get_upcoming_events(max_results=10, days_ahead=days)
+                    finally:
+                        self.calendar_service.calendar_id = original_calendar_id
+                else:
+                    return await self.calendar_service.get_upcoming_events(max_results=10, days_ahead=days)
             return loop.run_until_complete(get_events())
         except Exception as e:
             print(f"Error getting upcoming events: {e}")
@@ -1644,9 +1659,12 @@ CONFIGURE:
                 tasks = self._get_user_tasks_sync(user_id)
                 pending = [t for t in tasks if t.get('status') == 'pending'] if tasks else []
 
-                # Get today's calendar events (and filter out skipped ones)
-                todays_events = self._get_todays_events_sync()
-                todays_events = self._filter_skipped_events(user_id, todays_events)
+                # Get today's calendar events (only if calendar is enabled for this user)
+                todays_events = []
+                if self._is_calendar_enabled(user_id):
+                    user_calendar_id = self._get_user_calendar_id(user_id)
+                    todays_events = self._get_todays_events_sync(user_calendar_id if user_calendar_id else None)
+                    todays_events = self._filter_skipped_events(user_id, todays_events)
 
                 # Only send if there's something to report
                 if not pending and not todays_events:
@@ -1760,8 +1778,8 @@ CONFIGURE:
             except Exception as e:
                 print(f"Error sending daily summary to {user_id}: {e}")
 
-    def _get_todays_events_sync(self):
-        """Get today's calendar events synchronously"""
+    def _get_todays_events_sync(self, calendar_id: str = None):
+        """Get today's calendar events synchronously. Optionally use a specific calendar_id."""
         if not self.calendar_service:
             return []
 
@@ -1774,7 +1792,16 @@ CONFIGURE:
         try:
             async def get_events():
                 today = datetime.now(BRISBANE_TZ)
-                return await self.calendar_service.get_events_for_date(today)
+                # If a specific calendar_id is provided, temporarily switch to it
+                if calendar_id:
+                    original_calendar_id = self.calendar_service.calendar_id
+                    self.calendar_service.calendar_id = calendar_id
+                    try:
+                        return await self.calendar_service.get_events_for_date(today)
+                    finally:
+                        self.calendar_service.calendar_id = original_calendar_id
+                else:
+                    return await self.calendar_service.get_events_for_date(today)
             return loop.run_until_complete(get_events())
         except Exception as e:
             print(f"Error getting today's events: {e}")
@@ -1954,9 +1981,12 @@ CONFIGURE:
             tasks = self._get_user_tasks_sync(user_id)
             pending = [t for t in tasks if t.get('status') == 'pending'] if tasks else []
 
-            # Get today's calendar events
-            todays_events = self._get_todays_events_sync()
-            todays_events = self._filter_skipped_events(user_id, todays_events)
+            # Get today's calendar events (only if calendar is enabled for this user)
+            todays_events = []
+            if self._is_calendar_enabled(user_id):
+                user_calendar_id = self._get_user_calendar_id(user_id)
+                todays_events = self._get_todays_events_sync(user_calendar_id if user_calendar_id else None)
+                todays_events = self._filter_skipped_events(user_id, todays_events)
 
             now = datetime.now(BRISBANE_TZ)
             today = now.date()
@@ -2925,6 +2955,38 @@ CONFIGURE:
             print(f"Error saving user setting: {e}")
         finally:
             loop.close()
+
+    def _get_user_setting_sync(self, user_id: str, setting_key: str) -> str:
+        """Get a user setting synchronously"""
+        import asyncio
+        import nest_asyncio
+        nest_asyncio.apply()
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(
+                self.sheets_client.get_user_setting(user_id, setting_key)
+            ) or ""
+        except Exception as e:
+            print(f"Error getting user setting: {e}")
+            return ""
+        finally:
+            loop.close()
+
+    def _is_email_enabled(self, user_id: str) -> bool:
+        """Check if email features are enabled for this user (defaults to True)"""
+        setting = self._get_user_setting_sync(user_id, 'email_enabled')
+        return setting != 'false'
+
+    def _is_calendar_enabled(self, user_id: str) -> bool:
+        """Check if calendar features are enabled for this user (defaults to True)"""
+        setting = self._get_user_setting_sync(user_id, 'calendar_enabled')
+        return setting != 'false'
+
+    def _get_user_calendar_id(self, user_id: str) -> str:
+        """Get the calendar ID for this user (empty string means use global default)"""
+        return self._get_user_setting_sync(user_id, 'calendar_id')
 
     def _save_user(self, user_id: str, chat_id: int, username: str = ""):
         """Save or update user in persistent storage"""

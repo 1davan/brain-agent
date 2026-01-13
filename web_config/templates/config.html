@@ -355,6 +355,38 @@
                     </button>
                 </section>
 
+                <!-- User Settings -->
+                <section class="card card-full-width">
+                    <h2>User Settings</h2>
+                    <p class="section-desc">Configure features for the selected user.</p>
+                    <div class="user-settings-grid">
+                        <div class="setting-row">
+                            <label class="toggle-label">
+                                <input type="checkbox" id="settingEmailEnabled" onchange="toggleUserSetting('email_enabled', this.checked)">
+                                <span>Email Features</span>
+                            </label>
+                            <span class="setting-desc">Allow email drafts and sending</span>
+                        </div>
+                        <div class="setting-row">
+                            <label class="toggle-label">
+                                <input type="checkbox" id="settingCalendarEnabled" onchange="toggleUserSetting('calendar_enabled', this.checked)">
+                                <span>Calendar Features</span>
+                            </label>
+                            <span class="setting-desc">Show calendar events in summaries</span>
+                        </div>
+                        <div class="setting-row">
+                            <label for="settingCalendarId">Calendar ID:</label>
+                            <input type="text" id="settingCalendarId" placeholder="user@gmail.com (leave blank for default)">
+                            <button class="btn btn-secondary btn-small" onclick="saveCalendarId()">Save</button>
+                        </div>
+                        <div class="setting-row">
+                            <label for="settingCheckinHours">Check-in Hours:</label>
+                            <input type="text" id="settingCheckinHours" placeholder="10,14,18 or 'off'">
+                            <button class="btn btn-secondary btn-small" onclick="saveCheckinHours()">Save</button>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- Quick Stats -->
                 <section class="card card-full-width">
                     <h2>Quick Stats</h2>

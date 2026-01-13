@@ -1133,4 +1133,115 @@ async function loadCommandStats() {
     } catch (e) {
         console.error('Failed to load command stats:', e);
     }
+
+    // Also load user settings
+    loadUserSettings();
+}
+
+// ============================================================================
+// USER SETTINGS
+// ============================================================================
+
+async function loadUserSettings() {
+    if (!currentUserId) return;
+
+    try {
+        const response = await fetch(`/api/users/${encodeURIComponent(currentUserId)}/settings`);
+        const data = await response.json();
+
+        if (data.success && data.settings) {
+            document.getElementById('settingEmailEnabled').checked = data.settings.email_enabled;
+            document.getElementById('settingCalendarEnabled').checked = data.settings.calendar_enabled;
+            document.getElementById('settingCalendarId').value = data.settings.calendar_id || '';
+            document.getElementById('settingCheckinHours').value = data.settings.checkin_hours || '';
+        }
+    } catch (e) {
+        console.error('Failed to load user settings:', e);
+    }
+}
+
+async function toggleUserSetting(settingName, value) {
+    if (!currentUserId) {
+        showToast('Please select a user first', 'error');
+        return;
+    }
+
+    try {
+        const body = {};
+        body[settingName] = value;
+
+        const response = await fetch(`/api/users/${encodeURIComponent(currentUserId)}/settings`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            showToast(`${settingName.replace('_', ' ')} ${value ? 'enabled' : 'disabled'}`, 'success');
+        } else {
+            showToast('Error: ' + (data.error || 'Unknown error'), 'error');
+            // Revert checkbox
+            if (settingName === 'email_enabled') {
+                document.getElementById('settingEmailEnabled').checked = !value;
+            } else if (settingName === 'calendar_enabled') {
+                document.getElementById('settingCalendarEnabled').checked = !value;
+            }
+        }
+    } catch (e) {
+        showToast('Failed to update setting: ' + e, 'error');
+    }
+}
+
+async function saveCalendarId() {
+    if (!currentUserId) {
+        showToast('Please select a user first', 'error');
+        return;
+    }
+
+    const calendarId = document.getElementById('settingCalendarId').value.trim();
+
+    try {
+        const response = await fetch(`/api/users/${encodeURIComponent(currentUserId)}/settings`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({calendar_id: calendarId})
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            showToast('Calendar ID saved', 'success');
+        } else {
+            showToast('Error: ' + (data.error || 'Unknown error'), 'error');
+        }
+    } catch (e) {
+        showToast('Failed to save calendar ID: ' + e, 'error');
+    }
+}
+
+async function saveCheckinHours() {
+    if (!currentUserId) {
+        showToast('Please select a user first', 'error');
+        return;
+    }
+
+    const checkinHours = document.getElementById('settingCheckinHours').value.trim();
+
+    try {
+        const response = await fetch(`/api/users/${encodeURIComponent(currentUserId)}/settings`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({checkin_hours: checkinHours})
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            showToast('Check-in hours saved', 'success');
+            loadCommandStats(); // Refresh the stats display
+        } else {
+            showToast('Error: ' + (data.error || 'Unknown error'), 'error');
+        }
+    } catch (e) {
+        showToast('Failed to save check-in hours: ' + e, 'error');
+    }
 }

@@ -1392,6 +1392,76 @@ def api_commands_stats():
 
 
 # ============================================================================
+# USER SETTINGS API
+# ============================================================================
+
+@app.route("/api/users/<user_id>/settings")
+@login_required
+def api_user_settings_get(user_id):
+    """Get user-specific settings (email_enabled, calendar_enabled, calendar_id)."""
+    client = get_sheets_client()
+    if not client:
+        return jsonify({"success": False, "error": "Sheets client not configured"})
+
+    try:
+        settings = run_async(client.get_all_user_settings(user_id))
+        return jsonify({
+            "success": True,
+            "settings": {
+                "email_enabled": settings.get("email_enabled", "true") != "false",
+                "calendar_enabled": settings.get("calendar_enabled", "true") != "false",
+                "calendar_id": settings.get("calendar_id", ""),
+                "checkin_hours": settings.get("checkin_hours", "")
+            }
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/users/<user_id>/settings", methods=["PUT"])
+@login_required
+def api_user_settings_update(user_id):
+    """Update user-specific settings."""
+    data = request.json
+    client = get_sheets_client()
+    if not client:
+        return jsonify({"success": False, "error": "Sheets client not configured"})
+
+    try:
+        # Update email_enabled
+        if "email_enabled" in data:
+            run_async(client.set_user_setting(
+                user_id, "email_enabled",
+                "true" if data["email_enabled"] else "false"
+            ))
+
+        # Update calendar_enabled
+        if "calendar_enabled" in data:
+            run_async(client.set_user_setting(
+                user_id, "calendar_enabled",
+                "true" if data["calendar_enabled"] else "false"
+            ))
+
+        # Update calendar_id
+        if "calendar_id" in data:
+            run_async(client.set_user_setting(
+                user_id, "calendar_id",
+                data["calendar_id"]
+            ))
+
+        # Update checkin_hours
+        if "checkin_hours" in data:
+            run_async(client.set_user_setting(
+                user_id, "checkin_hours",
+                data["checkin_hours"]
+            ))
+
+        return jsonify({"success": True, "message": "Settings updated"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+# ============================================================================
 # SERVER
 # ============================================================================
 
