@@ -298,11 +298,28 @@ The 4-stage pipeline optimizes message processing for speed and accuracy:
 | `/check archives <term>` | Search archived tasks | `/check archives meeting` |
 | `/new session` | End active task discussion | `/new session` |
 
+### Quick Action Commands
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `/summary` | Get daily summary with actionable focus items | `/summary` |
+| `/deadlines` | View grouped deadline list (overdue/today/tomorrow/week) | `/deadlines` |
+| `/archive` | Archive completed tasks (7+ days old) | `/archive` |
+
+These commands include inline buttons for quick actions:
+- **Start Task**: Begin a task discussion session
+- **Done**: Mark task as complete
+- **View Overdue**: Expand to see all overdue tasks
+- **Snooze All +1 Day**: Push all overdue deadlines to tomorrow
+- **Focus on Today**: Show only today's tasks
+- **Show High Priority**: Filter to high/critical tasks
+- **Show All Tasks**: Display full task list
+
 ### Settings Commands
 
 | Command | Description |
 |---------|-------------|
-| `/settings` | Show current settings |
+| `/settings` | Show current settings and quick actions |
 | `/settings checkin 8,12,18` | Set check-in hours |
 | `/settings checkin off` | Disable check-ins |
 | `/settings skip "Event Name"` | Skip event in summaries |

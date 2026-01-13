@@ -1052,7 +1052,7 @@ def api_commands_checkin():
 @app.route("/api/commands/daily-summary", methods=["POST"])
 @login_required
 def api_commands_daily_summary():
-    """Send daily summary to user."""
+    """Send daily summary to user - improved format."""
     data = request.json
     user_id = data.get("user_id", "")
     chat_id = get_user_chat_id(user_id)
@@ -1067,30 +1067,82 @@ def api_commands_daily_summary():
     try:
         # Get pending tasks
         df = run_async(client.get_sheet_data("Tasks", user_id))
-        pending = df[df["status"] == "pending"]
+        pending_df = df[df["status"] == "pending"]
         if "archived" in df.columns:
-            pending = pending[pending["archived"].astype(str) != "true"]
+            pending_df = pending_df[pending_df["archived"].astype(str) != "true"]
 
-        # Build summary message
         now = datetime.now()
-        message = f"<b>Daily Summary - {now.strftime('%A, %B %d')}</b>\n\n"
+        today = now.date()
 
-        if pending.empty:
+        # Categorize tasks
+        overdue = []
+        due_today = []
+        high_priority = []
+        pending_tasks = []
+
+        for _, task in pending_df.iterrows():
+            title = str(task.get("title", "Untitled"))
+            priority = str(task.get("priority", ""))
+            deadline = str(task.get("deadline", ""))
+            task_id = str(task.get("task_id", ""))
+
+            task_info = {"title": title, "priority": priority, "task_id": task_id}
+            pending_tasks.append(task_info)
+
+            if priority in ("high", "critical"):
+                high_priority.append(task_info)
+
+            if deadline:
+                try:
+                    deadline_dt = datetime.fromisoformat(deadline.replace("Z", "+00:00")).replace(tzinfo=None)
+                    if deadline_dt.date() < today:
+                        overdue.append(task_info)
+                    elif deadline_dt.date() == today:
+                        due_today.append(task_info)
+                except:
+                    pass
+
+        # Build improved message
+        day_name = now.strftime("%A, %B %d")
+        message = f"DAILY SUMMARY - {day_name}\n\n"
+
+        if not pending_tasks:
             message += "No pending tasks. Enjoy your day!"
         else:
-            message += f"<b>Pending Tasks ({len(pending)}):</b>\n"
-            for _, task in pending.head(10).iterrows():
-                title = str(task.get("title", "Untitled"))
-                priority = str(task.get("priority", "medium"))
-                progress = int(task.get("progress_percent", 0) or 0)
-                icon = {"critical": "!!!", "high": "!!", "medium": "!", "low": "-"}.get(priority, "")
-                message += f"{icon} {title}"
-                if progress > 0:
-                    message += f" ({progress}%)"
+            # Today's Focus section (pick 1-3 most important)
+            focus_tasks = []
+            for t in overdue[:2]:
+                focus_tasks.append((t, "overdue"))
+            for t in due_today[:2]:
+                if len(focus_tasks) < 3:
+                    focus_tasks.append((t, "today"))
+            for t in high_priority[:2]:
+                if len(focus_tasks) < 3 and t not in [x[0] for x in focus_tasks]:
+                    focus_tasks.append((t, "priority"))
+
+            if focus_tasks:
+                message += "TODAY'S FOCUS:\n"
+                for i, (task, reason) in enumerate(focus_tasks[:3], 1):
+                    suffix = " (overdue!)" if reason == "overdue" else ""
+                    message += f"  {i}. {task['title']}{suffix}\n"
                 message += "\n"
 
-            if len(pending) > 10:
-                message += f"\n...and {len(pending) - 10} more tasks"
+            # Warnings section
+            if overdue:
+                message += f"WARNING: {len(overdue)} overdue task(s)\n\n"
+
+            # Stats summary
+            message += "STATS:\n"
+            message += f"  - {len(pending_tasks)} pending tasks"
+            if high_priority:
+                message += f" ({len(high_priority)} high priority)"
+            message += "\n"
+            if due_today:
+                message += f"  - {len(due_today)} due today\n"
+            if overdue:
+                message += f"  - {len(overdue)} overdue\n"
+
+            message += "\nUse /summary in Telegram for quick action buttons."
 
         result = send_telegram_message(chat_id, message)
         if result.get("ok"):
@@ -1177,7 +1229,7 @@ def api_commands_process_recurring():
 @app.route("/api/commands/check-deadlines", methods=["POST"])
 @login_required
 def api_commands_check_deadlines():
-    """Check for upcoming deadlines and notify user."""
+    """Check for upcoming deadlines and notify user - improved format."""
     data = request.json
     user_id = data.get("user_id", "")
     chat_id = get_user_chat_id(user_id)
@@ -1196,7 +1248,12 @@ def api_commands_check_deadlines():
             pending = pending[pending["archived"].astype(str) != "true"]
 
         now = datetime.now()
-        upcoming = []
+        today = now.date()
+
+        overdue = []
+        due_today = []
+        due_tomorrow = []
+        due_this_week = []
 
         for _, task in pending.iterrows():
             deadline = str(task.get("deadline", ""))
@@ -1204,36 +1261,74 @@ def api_commands_check_deadlines():
                 continue
             try:
                 deadline_dt = datetime.fromisoformat(deadline.replace("Z", "+00:00")).replace(tzinfo=None)
-                days_until = (deadline_dt.date() - now.date()).days
-                if days_until <= 3:
-                    upcoming.append({
-                        "title": str(task.get("title", "Untitled")),
-                        "days": days_until,
-                        "deadline": deadline_dt.strftime("%Y-%m-%d %H:%M")
-                    })
+                days_diff = (deadline_dt.date() - today).days
+                task_info = {
+                    "title": str(task.get("title", "Untitled")),
+                    "days": days_diff,
+                    "deadline": deadline_dt
+                }
+
+                if days_diff < 0:
+                    overdue.append(task_info)
+                elif days_diff == 0:
+                    due_today.append(task_info)
+                elif days_diff == 1:
+                    due_tomorrow.append(task_info)
+                elif days_diff <= 7:
+                    due_this_week.append(task_info)
             except:
                 continue
 
-        if not upcoming:
-            return jsonify({"success": True, "message": "No upcoming deadlines within 3 days"})
+        if not overdue and not due_today and not due_tomorrow and not due_this_week:
+            return jsonify({"success": True, "message": "No upcoming deadlines within the next week"})
 
-        # Sort by days until
-        upcoming.sort(key=lambda x: x["days"])
+        message = "DEADLINE CHECK\n\n"
 
-        message = "<b>Upcoming Deadlines:</b>\n\n"
-        for item in upcoming:
-            if item["days"] < 0:
-                message += f"OVERDUE: {item['title']} (was due {abs(item['days'])} day(s) ago)\n"
-            elif item["days"] == 0:
-                message += f"TODAY: {item['title']}\n"
-            elif item["days"] == 1:
-                message += f"TOMORROW: {item['title']}\n"
-            else:
-                message += f"In {item['days']} days: {item['title']}\n"
+        # Overdue section
+        if overdue:
+            overdue.sort(key=lambda x: x["days"])
+            message += f"CRITICAL - Overdue ({len(overdue)} task{'s' if len(overdue) != 1 else ''}):\n"
+            for item in overdue[:4]:
+                days_ago = abs(item["days"])
+                message += f"  - {item['title']} ({days_ago}d ago)\n"
+            if len(overdue) > 4:
+                message += f"  ... and {len(overdue) - 4} more\n"
+            message += "\n"
+
+        # Today section
+        if due_today:
+            message += f"TODAY ({len(due_today)} task{'s' if len(due_today) != 1 else ''}):\n"
+            for item in due_today[:4]:
+                message += f"  - {item['title']}\n"
+            if len(due_today) > 4:
+                message += f"  ... and {len(due_today) - 4} more\n"
+            message += "\n"
+
+        # Tomorrow section
+        if due_tomorrow:
+            message += f"TOMORROW ({len(due_tomorrow)} task{'s' if len(due_tomorrow) != 1 else ''}):\n"
+            for item in due_tomorrow[:3]:
+                message += f"  - {item['title']}\n"
+            if len(due_tomorrow) > 3:
+                message += f"  ... and {len(due_tomorrow) - 3} more\n"
+            message += "\n"
+
+        # This week section
+        if due_this_week:
+            message += f"THIS WEEK ({len(due_this_week)} task{'s' if len(due_this_week) != 1 else ''}):\n"
+            for item in due_this_week[:3]:
+                day_name = item["deadline"].strftime("%a")
+                message += f"  - {item['title']} ({day_name})\n"
+            if len(due_this_week) > 3:
+                message += f"  ... and {len(due_this_week) - 3} more\n"
+            message += "\n"
+
+        message += "Use /deadlines in Telegram for quick actions."
 
         result = send_telegram_message(chat_id, message)
+        total_count = len(overdue) + len(due_today) + len(due_tomorrow) + len(due_this_week)
         if result.get("ok"):
-            return jsonify({"success": True, "message": f"Sent {len(upcoming)} deadline reminder(s)"})
+            return jsonify({"success": True, "message": f"Sent deadline check ({total_count} tasks with deadlines)"})
         else:
             return jsonify({"success": False, "error": result.get("description", "Failed to send")})
 

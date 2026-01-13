@@ -648,6 +648,28 @@ class SimpleTelegramBot:
                 task_id = parts[1] if len(parts) > 1 else ''
                 self._handle_task_button(user_id, chat_id, message_id, task_id, 'skip')
 
+            # New callback handlers for improved summary/deadline buttons
+            elif action == 'view_overdue':
+                self._handle_view_overdue(user_id, chat_id, message_id)
+
+            elif action == 'snooze_all_overdue':
+                self._handle_snooze_overdue(user_id, chat_id, message_id)
+
+            elif action == 'focus_today':
+                self._handle_focus_today(user_id, chat_id, message_id)
+
+            elif action == 'start_task':
+                task_id = parts[1] if len(parts) > 1 else ''
+                if task_id:
+                    self._handle_start_task(user_id, chat_id, message_id, task_id)
+
+            elif action == 'show_priority':
+                priority = parts[1] if len(parts) > 1 else 'high'
+                self._handle_show_priority(user_id, chat_id, message_id, priority)
+
+            elif action == 'show_all_tasks':
+                self._handle_show_all_tasks(user_id, chat_id, message_id)
+
         except Exception as e:
             print(f"Error handling callback query: {e}")
             import traceback
@@ -1098,6 +1120,11 @@ COMMANDS:
 - /check archives <term> - Search archived tasks
 - /new session - End current task discussion
 
+QUICK ACTIONS:
+- /summary - Get your daily summary now
+- /deadlines - Show overdue and upcoming tasks
+- /archive - Archive old completed tasks
+
 PROACTIVE FEATURES:
 - I'll check in on your tasks at configurable times
 - Use /settings to change check-in schedule
@@ -1249,7 +1276,12 @@ Time: {self.daily_summary_hour}:00 AM
 SKIPPED CALENDAR EVENTS:
 {skipped_str}
 
-COMMANDS:
+QUICK ACTIONS:
+- /summary - Get your daily summary now
+- /deadlines - Show overdue and upcoming tasks
+- /archive - Archive completed tasks (7+ days old)
+
+CONFIGURE:
 - /settings checkin 8,12,18 - set check-in hours
 - /settings checkin off - disable check-ins
 - /settings skip "Team Standup" - skip event in summaries
@@ -1355,6 +1387,18 @@ COMMANDS:
                 del self.task_discussion_sessions[user_id]
                 return "Task discussion session ended. Ready for new requests!"
             return "No active task discussion session."
+
+        elif command == '/summary':
+            # Trigger immediate daily summary
+            return self._send_summary_command(user_id, chat_id)
+
+        elif command == '/deadlines':
+            # Show upcoming deadlines
+            return self._show_deadlines_command(user_id, chat_id)
+
+        elif command == '/archive':
+            # Run auto-archive now
+            return self._run_archive_command(user_id, chat_id)
 
         return None  # Not a recognized command, process normally
 
@@ -1564,8 +1608,9 @@ COMMANDS:
             time.sleep(60)
 
     def _send_daily_summaries(self):
-        """Send daily task and calendar summaries to known users"""
-        today = datetime.now(BRISBANE_TZ).date()
+        """Send daily task and calendar summaries to known users - improved format"""
+        now = datetime.now(BRISBANE_TZ)
+        today = now.date()
 
         for user_id, chat_id in self.known_users:
             # Only send once per day
@@ -1576,7 +1621,6 @@ COMMANDS:
                 # Get user's tasks
                 tasks = self._get_user_tasks_sync(user_id)
                 pending = [t for t in tasks if t.get('status') == 'pending'] if tasks else []
-                high_priority = [t for t in pending if t.get('priority') == 'high']
 
                 # Get today's calendar events (and filter out skipped ones)
                 todays_events = self._get_todays_events_sync()
@@ -1586,17 +1630,61 @@ COMMANDS:
                 if not pending and not todays_events:
                     continue
 
-                message = f"Good morning! Here's your daily summary for {today.strftime('%A, %B %d')}:\n\n"
+                # Calculate overdue, due today, high priority
+                overdue = []
+                due_today = []
+                high_priority = []
+
+                for task in pending:
+                    deadline_str = task.get('deadline', '')
+                    priority = task.get('priority', '')
+
+                    if priority in ('high', 'critical'):
+                        high_priority.append(task)
+
+                    if deadline_str:
+                        try:
+                            deadline_dt = datetime.fromisoformat(deadline_str.replace('Z', '+00:00'))
+                            if deadline_dt.tzinfo is None:
+                                deadline_dt = BRISBANE_TZ.localize(deadline_dt)
+                            if deadline_dt.date() < today:
+                                overdue.append(task)
+                            elif deadline_dt.date() == today:
+                                due_today.append(task)
+                        except:
+                            pass
+
+                # Build improved message
+                day_name = now.strftime('%A, %B %d')
+                message = f"GOOD MORNING - {day_name}\n\n"
+
+                # Today's Focus section (pick 1-3 most important)
+                focus_tasks = []
+                for t in overdue[:2]:
+                    focus_tasks.append((t, 'overdue'))
+                for t in due_today[:2]:
+                    if len(focus_tasks) < 3:
+                        focus_tasks.append((t, 'today'))
+                for t in high_priority[:2]:
+                    if len(focus_tasks) < 3 and t not in [x[0] for x in focus_tasks]:
+                        focus_tasks.append((t, 'priority'))
+
+                if focus_tasks:
+                    message += "TODAY'S FOCUS:\n"
+                    for i, (task, reason) in enumerate(focus_tasks[:3], 1):
+                        suffix = " (overdue!)" if reason == 'overdue' else ""
+                        message += f"  {i}. {task.get('title')}{suffix}\n"
+                    message += "\n"
 
                 # Calendar section
                 if todays_events:
-                    message += "TODAY'S CALENDAR:\n"
-                    for event in todays_events[:5]:
+                    message += "CALENDAR:\n"
+                    for event in todays_events[:4]:
                         start_str = event.get('start', '')
                         try:
                             if 'T' in start_str:
                                 dt = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
-                                time_str = dt.strftime('%I:%M%p')
+                                time_str = dt.strftime('%I:%M%p').lstrip('0')
                             else:
                                 time_str = "All day"
                         except:
@@ -1604,21 +1692,46 @@ COMMANDS:
                         message += f"  - {time_str}: {event.get('summary', 'Untitled')}\n"
                     message += "\n"
 
-                # Tasks section
-                if pending:
-                    message += f"TASKS: {len(pending)} pending"
-                    if high_priority:
-                        message += f" ({len(high_priority)} high priority)"
-                    message += "\n"
+                # Warnings section
+                if overdue:
+                    message += f"WARNING: {len(overdue)} overdue task(s)\n"
+                    message += "  Use /deadlines to see them\n\n"
 
-                    if high_priority:
-                        message += "HIGH PRIORITY:\n"
-                        for task in high_priority[:3]:
-                            message += f"  - {task.get('title')}\n"
+                # Stats summary
+                message += "STATS:\n"
+                message += f"  - {len(pending)} pending tasks"
+                if high_priority:
+                    message += f" ({len(high_priority)} high priority)"
+                message += "\n"
+                if due_today:
+                    message += f"  - {len(due_today)} due today\n"
+                if overdue:
+                    message += f"  - {len(overdue)} overdue\n"
 
-                message += "\nReply with 'show tasks' or 'show calendar' for details."
+                # Buttons
+                buttons = []
+                if focus_tasks:
+                    first_task = focus_tasks[0][0]
+                    buttons.append([
+                        {'text': f'Start: {first_task.get("title", "Task")[:20]}', 'callback_data': f'start_task:{first_task.get("task_id")}'}
+                    ])
+                if high_priority:
+                    buttons.append([
+                        {'text': 'Show High Priority', 'callback_data': 'show_priority:high'},
+                        {'text': 'Show All Tasks', 'callback_data': 'show_all_tasks'}
+                    ])
+                if overdue:
+                    buttons.append([
+                        {'text': 'View Overdue', 'callback_data': 'view_overdue'},
+                        {'text': 'Snooze All +1 Day', 'callback_data': 'snooze_all_overdue'}
+                    ])
 
-                self.send_message(chat_id, message)
+                if buttons:
+                    reply_markup = {'inline_keyboard': buttons}
+                    self.send_message(chat_id, message, reply_markup=reply_markup)
+                else:
+                    self.send_message(chat_id, message)
+
                 self.last_daily_summary[user_id] = today
                 print(f"Sent daily summary to {user_id}")
 
@@ -1811,6 +1924,561 @@ COMMANDS:
 
             except Exception as e:
                 print(f"Error checking deadlines for {user_id}: {e}")
+
+    def _send_summary_command(self, user_id, chat_id):
+        """Handle /summary command - send improved daily summary immediately."""
+        try:
+            # Get user's tasks
+            tasks = self._get_user_tasks_sync(user_id)
+            pending = [t for t in tasks if t.get('status') == 'pending'] if tasks else []
+
+            # Get today's calendar events
+            todays_events = self._get_todays_events_sync()
+            todays_events = self._filter_skipped_events(user_id, todays_events)
+
+            now = datetime.now(BRISBANE_TZ)
+            today = now.date()
+
+            # Calculate overdue and upcoming
+            overdue = []
+            due_today = []
+            high_priority = []
+
+            for task in pending:
+                deadline_str = task.get('deadline', '')
+                priority = task.get('priority', '')
+
+                if priority in ('high', 'critical'):
+                    high_priority.append(task)
+
+                if deadline_str:
+                    try:
+                        deadline_dt = datetime.fromisoformat(deadline_str.replace('Z', '+00:00'))
+                        if deadline_dt.tzinfo is None:
+                            deadline_dt = BRISBANE_TZ.localize(deadline_dt)
+                        if deadline_dt.date() < today:
+                            overdue.append(task)
+                        elif deadline_dt.date() == today:
+                            due_today.append(task)
+                    except:
+                        pass
+
+            # Build improved message
+            day_name = now.strftime('%A, %B %d')
+            message = f"DAILY SUMMARY - {day_name}\n\n"
+
+            # Today's Focus section (pick 1-3 most important)
+            focus_tasks = []
+            # Priority: overdue first, then due today, then high priority
+            for t in overdue[:2]:
+                focus_tasks.append((t, 'overdue'))
+            for t in due_today[:2]:
+                if len(focus_tasks) < 3:
+                    focus_tasks.append((t, 'today'))
+            for t in high_priority[:2]:
+                if len(focus_tasks) < 3 and t not in [x[0] for x in focus_tasks]:
+                    focus_tasks.append((t, 'priority'))
+
+            if focus_tasks:
+                message += "TODAY'S FOCUS:\n"
+                for i, (task, reason) in enumerate(focus_tasks[:3], 1):
+                    suffix = " (overdue!)" if reason == 'overdue' else ""
+                    message += f"  {i}. {task.get('title')}{suffix}\n"
+                message += "\n"
+
+            # Calendar section
+            if todays_events:
+                message += "CALENDAR:\n"
+                for event in todays_events[:4]:
+                    start_str = event.get('start', '')
+                    try:
+                        if 'T' in start_str:
+                            dt = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
+                            time_str = dt.strftime('%I:%M%p').lstrip('0')
+                        else:
+                            time_str = "All day"
+                    except:
+                        time_str = start_str
+                    message += f"  - {time_str}: {event.get('summary', 'Untitled')}\n"
+                message += "\n"
+
+            # Warnings section
+            if overdue:
+                message += f"WARNING: {len(overdue)} overdue task(s)\n"
+                message += "  Use /deadlines to see them\n\n"
+
+            # Stats summary
+            message += "STATS:\n"
+            message += f"  - {len(pending)} pending tasks"
+            if high_priority:
+                message += f" ({len(high_priority)} high priority)"
+            message += "\n"
+            if due_today:
+                message += f"  - {len(due_today)} due today\n"
+            if overdue:
+                message += f"  - {len(overdue)} overdue\n"
+
+            # Buttons
+            buttons = []
+            if focus_tasks:
+                first_task = focus_tasks[0][0]
+                buttons.append([
+                    {'text': f'Start: {first_task.get("title", "Task")[:20]}', 'callback_data': f'start_task:{first_task.get("task_id")}'}
+                ])
+            if high_priority:
+                buttons.append([
+                    {'text': 'Show High Priority', 'callback_data': 'show_priority:high'},
+                    {'text': 'Show All Tasks', 'callback_data': 'show_all_tasks'}
+                ])
+            if overdue:
+                buttons.append([
+                    {'text': 'View Overdue', 'callback_data': 'view_overdue'},
+                    {'text': 'Snooze All +1 Day', 'callback_data': 'snooze_all_overdue'}
+                ])
+
+            if buttons:
+                reply_markup = {'inline_keyboard': buttons}
+                self.send_message(chat_id, message, reply_markup=reply_markup)
+            else:
+                self.send_message(chat_id, message)
+
+            return None  # Already sent message
+
+        except Exception as e:
+            print(f"Error in /summary command: {e}")
+            import traceback
+            traceback.print_exc()
+            return f"Error generating summary: {e}"
+
+    def _show_deadlines_command(self, user_id, chat_id):
+        """Handle /deadlines command - show grouped deadline list."""
+        try:
+            tasks = self._get_user_tasks_sync(user_id)
+            if not tasks:
+                return "No tasks found."
+
+            pending = [t for t in tasks if t.get('status') == 'pending']
+            now = datetime.now(BRISBANE_TZ)
+            today = now.date()
+
+            overdue = []
+            due_today = []
+            due_tomorrow = []
+            due_this_week = []
+
+            for task in pending:
+                deadline_str = task.get('deadline', '')
+                if not deadline_str:
+                    continue
+
+                try:
+                    deadline_dt = datetime.fromisoformat(deadline_str.replace('Z', '+00:00'))
+                    if deadline_dt.tzinfo is None:
+                        deadline_dt = BRISBANE_TZ.localize(deadline_dt)
+
+                    days_diff = (deadline_dt.date() - today).days
+                    task_info = {
+                        'task': task,
+                        'days': days_diff,
+                        'deadline': deadline_dt
+                    }
+
+                    if days_diff < 0:
+                        overdue.append(task_info)
+                    elif days_diff == 0:
+                        due_today.append(task_info)
+                    elif days_diff == 1:
+                        due_tomorrow.append(task_info)
+                    elif days_diff <= 7:
+                        due_this_week.append(task_info)
+                except:
+                    continue
+
+            if not overdue and not due_today and not due_tomorrow and not due_this_week:
+                return "No upcoming deadlines within the next week."
+
+            message = "DEADLINE CHECK\n\n"
+
+            # Overdue section
+            if overdue:
+                overdue.sort(key=lambda x: x['days'])  # Most overdue first
+                message += f"CRITICAL - Overdue ({len(overdue)} task{'s' if len(overdue) != 1 else ''}):\n"
+                for item in overdue[:4]:
+                    days_ago = abs(item['days'])
+                    message += f"  - {item['task'].get('title')} ({days_ago}d ago)\n"
+                if len(overdue) > 4:
+                    message += f"  ... and {len(overdue) - 4} more\n"
+                message += "\n"
+
+            # Today section
+            if due_today:
+                message += f"TODAY ({len(due_today)} task{'s' if len(due_today) != 1 else ''}):\n"
+                for item in due_today[:4]:
+                    message += f"  - {item['task'].get('title')}\n"
+                if len(due_today) > 4:
+                    message += f"  ... and {len(due_today) - 4} more\n"
+                message += "\n"
+
+            # Tomorrow section
+            if due_tomorrow:
+                message += f"TOMORROW ({len(due_tomorrow)} task{'s' if len(due_tomorrow) != 1 else ''}):\n"
+                for item in due_tomorrow[:3]:
+                    message += f"  - {item['task'].get('title')}\n"
+                if len(due_tomorrow) > 3:
+                    message += f"  ... and {len(due_tomorrow) - 3} more\n"
+                message += "\n"
+
+            # This week section
+            if due_this_week:
+                message += f"THIS WEEK ({len(due_this_week)} task{'s' if len(due_this_week) != 1 else ''}):\n"
+                for item in due_this_week[:3]:
+                    day_name = item['deadline'].strftime('%a')
+                    message += f"  - {item['task'].get('title')} ({day_name})\n"
+                if len(due_this_week) > 3:
+                    message += f"  ... and {len(due_this_week) - 3} more\n"
+                message += "\n"
+
+            message += "Tip: Reply with a task name to update its deadline."
+
+            # Buttons
+            buttons = []
+            if overdue:
+                buttons.append([
+                    {'text': 'View All Overdue', 'callback_data': 'view_overdue'},
+                    {'text': 'Snooze All +1 Day', 'callback_data': 'snooze_all_overdue'}
+                ])
+            if due_today:
+                buttons.append([
+                    {'text': 'Focus on Today', 'callback_data': 'focus_today'}
+                ])
+            buttons.append([
+                {'text': 'Show All Tasks', 'callback_data': 'show_all_tasks'}
+            ])
+
+            reply_markup = {'inline_keyboard': buttons}
+            self.send_message(chat_id, message, reply_markup=reply_markup)
+            return None  # Already sent message
+
+        except Exception as e:
+            print(f"Error in /deadlines command: {e}")
+            import traceback
+            traceback.print_exc()
+            return f"Error checking deadlines: {e}"
+
+    def _run_archive_command(self, user_id, chat_id):
+        """Handle /archive command - run auto-archive now."""
+        try:
+            tasks = self._get_user_tasks_sync(user_id)
+            if not tasks:
+                return "No tasks found."
+
+            now = datetime.now(BRISBANE_TZ)
+            archived_count = 0
+
+            for task in tasks:
+                if task.get('status') != 'complete':
+                    continue
+                if str(task.get('archived', 'false')).lower() == 'true':
+                    continue
+
+                # Check completion date
+                completed_at_str = task.get('completed_at', '')
+                if not completed_at_str:
+                    continue
+
+                try:
+                    completed_at = datetime.fromisoformat(completed_at_str.replace('Z', '+00:00'))
+                    if completed_at.tzinfo is None:
+                        completed_at = BRISBANE_TZ.localize(completed_at)
+
+                    days_since = (now - completed_at).days
+
+                    if days_since >= 7:
+                        # Archive this task
+                        task_id = task.get('task_id')
+                        if task_id:
+                            import asyncio
+                            import nest_asyncio
+                            nest_asyncio.apply()
+
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            try:
+                                loop.run_until_complete(
+                                    self.task_agent.update_task(user_id, task_id, {'archived': 'true'})
+                                )
+                                archived_count += 1
+                                print(f"Archived task: {task.get('title')}")
+                            finally:
+                                loop.close()
+                except:
+                    continue
+
+            if archived_count == 0:
+                return "No tasks to archive. Tasks are archived when completed for 7+ days."
+
+            return f"Archived {archived_count} completed task{'s' if archived_count != 1 else ''} (completed 7+ days ago)."
+
+        except Exception as e:
+            print(f"Error in /archive command: {e}")
+            import traceback
+            traceback.print_exc()
+            return f"Error archiving tasks: {e}"
+
+    def _handle_view_overdue(self, user_id, chat_id, message_id):
+        """Show full list of overdue tasks."""
+        try:
+            tasks = self._get_user_tasks_sync(user_id)
+            pending = [t for t in tasks if t.get('status') == 'pending'] if tasks else []
+            now = datetime.now(BRISBANE_TZ)
+            today = now.date()
+
+            overdue = []
+            for task in pending:
+                deadline_str = task.get('deadline', '')
+                if not deadline_str:
+                    continue
+                try:
+                    deadline_dt = datetime.fromisoformat(deadline_str.replace('Z', '+00:00'))
+                    if deadline_dt.tzinfo is None:
+                        deadline_dt = BRISBANE_TZ.localize(deadline_dt)
+                    if deadline_dt.date() < today:
+                        days_ago = (today - deadline_dt.date()).days
+                        overdue.append({'task': task, 'days': days_ago})
+                except:
+                    continue
+
+            if not overdue:
+                self.edit_message(chat_id, message_id, "No overdue tasks!")
+                return
+
+            overdue.sort(key=lambda x: -x['days'])  # Most overdue first
+
+            message = "ALL OVERDUE TASKS:\n\n"
+            for i, item in enumerate(overdue, 1):
+                message += f"{i}. {item['task'].get('title')} ({item['days']}d ago)\n"
+
+            # Add done buttons for top 5
+            buttons = []
+            for item in overdue[:5]:
+                task = item['task']
+                short_title = task.get('title', 'Task')[:20]
+                buttons.append([
+                    {'text': f'Done: {short_title}', 'callback_data': f'task_done:{task.get("task_id")}'}
+                ])
+
+            reply_markup = {'inline_keyboard': buttons}
+            self.edit_message(chat_id, message_id, message, reply_markup=reply_markup)
+
+        except Exception as e:
+            print(f"Error in view_overdue: {e}")
+            self.edit_message(chat_id, message_id, f"Error: {e}")
+
+    def _handle_snooze_overdue(self, user_id, chat_id, message_id):
+        """Push all overdue task deadlines forward by 1 day."""
+        try:
+            tasks = self._get_user_tasks_sync(user_id)
+            pending = [t for t in tasks if t.get('status') == 'pending'] if tasks else []
+            now = datetime.now(BRISBANE_TZ)
+            today = now.date()
+
+            overdue = []
+            for task in pending:
+                deadline_str = task.get('deadline', '')
+                if not deadline_str:
+                    continue
+                try:
+                    deadline_dt = datetime.fromisoformat(deadline_str.replace('Z', '+00:00'))
+                    if deadline_dt.tzinfo is None:
+                        deadline_dt = BRISBANE_TZ.localize(deadline_dt)
+                    if deadline_dt.date() < today:
+                        overdue.append(task)
+                except:
+                    continue
+
+            if not overdue:
+                self.edit_message(chat_id, message_id, "No overdue tasks to snooze.")
+                return
+
+            import asyncio
+            import nest_asyncio
+            nest_asyncio.apply()
+
+            count = 0
+            tomorrow = now + timedelta(days=1)
+            tomorrow = tomorrow.replace(hour=9, minute=0, second=0, microsecond=0)  # Set to 9 AM
+
+            for task in overdue:
+                task_id = task.get('task_id')
+                if not task_id:
+                    continue
+
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(
+                        self.task_agent.update_task(user_id, task_id, {'deadline': tomorrow.isoformat()})
+                    )
+                    count += 1
+                finally:
+                    loop.close()
+
+            self.edit_message(chat_id, message_id, f"Snoozed {count} overdue task{'s' if count != 1 else ''} to tomorrow (9:00 AM).")
+
+        except Exception as e:
+            print(f"Error in snooze_overdue: {e}")
+            self.edit_message(chat_id, message_id, f"Error: {e}")
+
+    def _handle_focus_today(self, user_id, chat_id, message_id):
+        """Show only today's tasks."""
+        try:
+            tasks = self._get_user_tasks_sync(user_id)
+            pending = [t for t in tasks if t.get('status') == 'pending'] if tasks else []
+            now = datetime.now(BRISBANE_TZ)
+            today = now.date()
+
+            due_today = []
+            for task in pending:
+                deadline_str = task.get('deadline', '')
+                if not deadline_str:
+                    continue
+                try:
+                    deadline_dt = datetime.fromisoformat(deadline_str.replace('Z', '+00:00'))
+                    if deadline_dt.tzinfo is None:
+                        deadline_dt = BRISBANE_TZ.localize(deadline_dt)
+                    if deadline_dt.date() == today:
+                        due_today.append(task)
+                except:
+                    continue
+
+            if not due_today:
+                self.edit_message(chat_id, message_id, "No tasks due today.")
+                return
+
+            message = f"TODAY'S TASKS ({len(due_today)}):\n\n"
+            for i, task in enumerate(due_today, 1):
+                message += f"{i}. {task.get('title')}\n"
+
+            # Add done buttons
+            buttons = []
+            for task in due_today[:5]:
+                short_title = task.get('title', 'Task')[:20]
+                buttons.append([
+                    {'text': f'Done: {short_title}', 'callback_data': f'task_done:{task.get("task_id")}'}
+                ])
+
+            reply_markup = {'inline_keyboard': buttons}
+            self.edit_message(chat_id, message_id, message, reply_markup=reply_markup)
+
+        except Exception as e:
+            print(f"Error in focus_today: {e}")
+            self.edit_message(chat_id, message_id, f"Error: {e}")
+
+    def _handle_start_task(self, user_id, chat_id, message_id, task_id):
+        """Start a task discussion session for specific task."""
+        try:
+            tasks = self._get_user_tasks_sync(user_id)
+            task = None
+            for t in tasks:
+                if t.get('task_id') == task_id:
+                    task = t
+                    break
+
+            if not task:
+                self.edit_message(chat_id, message_id, "Task not found.")
+                return
+
+            # Start task discussion session
+            self.task_discussion_sessions[user_id] = {
+                'task_id': task_id,
+                'task_title': task.get('title'),
+                'started_at': datetime.now(BRISBANE_TZ)
+            }
+
+            message = f"Let's work on: {task.get('title')}\n\n"
+            if task.get('description'):
+                message += f"Description: {task.get('description')}\n"
+            message += f"Current progress: {task.get('progress_percent', 0)}%\n\n"
+            message += "Tell me how it's going or what you need help with!\n"
+            message += "Quick replies: 'done', '50%', 'blocked', 'skip'"
+
+            self.edit_message(chat_id, message_id, message)
+
+        except Exception as e:
+            print(f"Error in start_task: {e}")
+            self.edit_message(chat_id, message_id, f"Error: {e}")
+
+    def _handle_show_priority(self, user_id, chat_id, message_id, priority='high'):
+        """Filter tasks by priority."""
+        try:
+            tasks = self._get_user_tasks_sync(user_id)
+            pending = [t for t in tasks if t.get('status') == 'pending'] if tasks else []
+
+            if priority == 'high':
+                filtered = [t for t in pending if t.get('priority') in ('high', 'critical')]
+            else:
+                filtered = [t for t in pending if t.get('priority') == priority]
+
+            if not filtered:
+                self.edit_message(chat_id, message_id, f"No {priority} priority tasks found.")
+                return
+
+            message = f"HIGH PRIORITY TASKS ({len(filtered)}):\n\n"
+            for i, task in enumerate(filtered, 1):
+                priority_label = task.get('priority', 'normal').upper()
+                message += f"{i}. [{priority_label}] {task.get('title')}\n"
+
+            # Add done buttons
+            buttons = []
+            for task in filtered[:5]:
+                short_title = task.get('title', 'Task')[:18]
+                buttons.append([
+                    {'text': f'Done: {short_title}', 'callback_data': f'task_done:{task.get("task_id")}'}
+                ])
+
+            reply_markup = {'inline_keyboard': buttons}
+            self.edit_message(chat_id, message_id, message, reply_markup=reply_markup)
+
+        except Exception as e:
+            print(f"Error in show_priority: {e}")
+            self.edit_message(chat_id, message_id, f"Error: {e}")
+
+    def _handle_show_all_tasks(self, user_id, chat_id, message_id):
+        """Redirect to /tasks command output."""
+        try:
+            tasks = self._get_user_tasks_sync(user_id)
+            pending = [t for t in tasks if t.get('status') == 'pending'] if tasks else []
+
+            if not pending:
+                self.edit_message(chat_id, message_id, "No pending tasks.")
+                return
+
+            message = f"ALL PENDING TASKS ({len(pending)}):\n\n"
+
+            # Group by priority
+            critical = [t for t in pending if t.get('priority') == 'critical']
+            high = [t for t in pending if t.get('priority') == 'high']
+            medium = [t for t in pending if t.get('priority') == 'medium']
+            low = [t for t in pending if t.get('priority') == 'low']
+            normal = [t for t in pending if t.get('priority') not in ('critical', 'high', 'medium', 'low')]
+
+            count = 0
+            for group, label in [(critical, 'CRITICAL'), (high, 'HIGH'), (medium, 'MEDIUM'), (normal, ''), (low, 'LOW')]:
+                for task in group:
+                    if count >= 15:
+                        break
+                    prefix = f"[{label}] " if label else ""
+                    message += f"- {prefix}{task.get('title')}\n"
+                    count += 1
+
+            if len(pending) > 15:
+                message += f"\n... and {len(pending) - 15} more tasks"
+
+            self.edit_message(chat_id, message_id, message)
+
+        except Exception as e:
+            print(f"Error in show_all_tasks: {e}")
+            self.edit_message(chat_id, message_id, f"Error: {e}")
 
     def _process_recurring_tasks(self):
         """Check for completed recurring tasks and create next occurrence"""

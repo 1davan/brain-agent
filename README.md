@@ -48,7 +48,13 @@ The bot will start and connect to Telegram.
 - Context-aware responses
 - Multi-turn dialogue support
 - Task discussion sessions with 5-min timeout
-- Commands: /start, /help, /status, /tasks, /memories, /calendar, /check archives, /new session
+- Commands: /start, /help, /status, /tasks, /memories, /calendar, /dashboard, /settings, /check archives, /new session
+
+**Quick Actions**
+- /summary - Get your daily summary with actionable focus items
+- /deadlines - View grouped deadline list (overdue/today/tomorrow/week)
+- /archive - Archive old completed tasks (7+ days)
+- Inline buttons for quick task completion, snoozing, and filtering
 
 ## Setup
 
