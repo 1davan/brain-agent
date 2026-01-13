@@ -63,7 +63,7 @@ body {
 
 /* Main Container */
 .container {
-    max-width: 900px;
+    max-width: 1200px;
     margin: 0 auto;
     padding: 1rem;
 }
@@ -1001,5 +1001,279 @@ input[type="range"]::-moz-range-thumb {
 
     .message {
         max-width: 95%;
+    }
+}
+
+/* ============================================================================
+   SPREADSHEET TABLE STYLES
+   ============================================================================ */
+
+.spreadsheet-container {
+    overflow-x: auto;
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    background: white;
+}
+
+.spreadsheet {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+
+.spreadsheet thead {
+    background: var(--gray-50);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.spreadsheet th {
+    padding: 0.625rem 0.75rem;
+    text-align: left;
+    font-weight: 600;
+    color: var(--gray-700);
+    border-bottom: 2px solid var(--gray-200);
+    white-space: nowrap;
+}
+
+.spreadsheet td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--gray-100);
+    vertical-align: middle;
+}
+
+.spreadsheet tbody tr:hover {
+    background: var(--gray-50);
+}
+
+.spreadsheet tbody tr.row-dirty {
+    background: #fefce8;
+}
+
+.spreadsheet tbody tr.row-new {
+    background: #f0fdf4;
+}
+
+.spreadsheet tbody tr.row-complete {
+    opacity: 0.6;
+}
+
+.spreadsheet tbody tr.row-complete .cell-input,
+.spreadsheet tbody tr.row-complete .cell-textarea {
+    text-decoration: line-through;
+    color: var(--gray-500);
+}
+
+.spreadsheet tbody tr.row-archived {
+    opacity: 0.4;
+    background: var(--gray-100);
+}
+
+/* Column widths */
+.col-drag { width: 32px; }
+.col-done { width: 50px; text-align: center; }
+.col-priority { width: 100px; }
+.col-category { width: 120px; }
+.col-key { width: 150px; }
+.col-title { width: 200px; }
+.col-value { min-width: 250px; }
+.col-description { min-width: 200px; }
+.col-confidence { width: 120px; }
+.col-progress { width: 120px; }
+.col-tags { width: 150px; }
+.col-deadline { width: 160px; }
+.col-actions { width: 50px; text-align: center; }
+
+/* Cell inputs */
+.cell-input,
+.cell-textarea,
+.cell-select {
+    width: 100%;
+    padding: 0.375rem 0.5rem;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    font-size: 0.8125rem;
+    background: transparent;
+    transition: border-color 0.15s, background-color 0.15s;
+}
+
+.cell-input:hover,
+.cell-textarea:hover,
+.cell-select:hover {
+    background: white;
+    border-color: var(--gray-300);
+}
+
+.cell-input:focus,
+.cell-textarea:focus,
+.cell-select:focus {
+    outline: none;
+    background: white;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.1);
+}
+
+.cell-textarea {
+    min-height: 60px;
+    resize: vertical;
+    font-family: inherit;
+}
+
+.cell-select {
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    background-position: right 0.25rem center;
+    background-repeat: no-repeat;
+    background-size: 1.25em 1.25em;
+    padding-right: 1.5rem;
+}
+
+/* Priority select colors */
+.cell-select.priority-critical { color: #991b1b; font-weight: 500; }
+.cell-select.priority-high { color: #9a3412; font-weight: 500; }
+.cell-select.priority-medium { color: #3730a3; }
+.cell-select.priority-low { color: var(--gray-600); }
+
+/* Checkbox styling */
+.cell-checkbox {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: var(--primary);
+}
+
+/* Slider in cells */
+.cell-slider-container {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.cell-slider {
+    flex: 1;
+    height: 6px;
+    min-width: 60px;
+}
+
+.cell-slider::-webkit-slider-thumb {
+    width: 14px;
+    height: 14px;
+}
+
+.cell-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+}
+
+.slider-value {
+    font-size: 0.75rem;
+    color: var(--gray-600);
+    min-width: 32px;
+    text-align: right;
+}
+
+/* Datetime input */
+.cell-datetime {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.375rem;
+}
+
+/* Drag handle */
+.drag-handle {
+    cursor: grab;
+    color: var(--gray-400);
+    font-size: 1rem;
+    padding: 0.25rem;
+    user-select: none;
+}
+
+.drag-handle:hover {
+    color: var(--gray-600);
+}
+
+.drag-handle:active {
+    cursor: grabbing;
+}
+
+/* Row being dragged */
+.spreadsheet tbody tr.dragging {
+    opacity: 0.5;
+    background: var(--gray-200);
+}
+
+.spreadsheet tbody tr.drag-over {
+    border-top: 2px solid var(--primary);
+}
+
+/* Delete button */
+.btn-icon {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--gray-400);
+    transition: color 0.15s, background-color 0.15s;
+}
+
+.btn-icon:hover {
+    background: var(--gray-100);
+    color: var(--gray-600);
+}
+
+.btn-delete:hover {
+    background: #fef2f2;
+    color: var(--danger);
+}
+
+/* Row with priority indicator */
+.spreadsheet tbody tr[data-priority="critical"] {
+    border-left: 3px solid var(--danger);
+}
+
+.spreadsheet tbody tr[data-priority="high"] {
+    border-left: 3px solid var(--warning);
+}
+
+.spreadsheet tbody tr[data-priority="medium"] {
+    border-left: 3px solid var(--primary);
+}
+
+.spreadsheet tbody tr[data-priority="low"] {
+    border-left: 3px solid var(--gray-300);
+}
+
+/* Empty table state */
+.spreadsheet tbody tr.empty-row td {
+    text-align: center;
+    padding: 2rem;
+    color: var(--gray-500);
+}
+
+/* Responsive spreadsheet */
+@media (max-width: 768px) {
+    .spreadsheet-container {
+        margin: 0 -1rem;
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+    }
+
+    .spreadsheet th,
+    .spreadsheet td {
+        padding: 0.5rem;
+    }
+
+    .col-description,
+    .col-tags {
+        display: none;
     }
 }

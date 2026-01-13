@@ -1,6 +1,6 @@
 /**
  * Brain Agent Dashboard JavaScript
- * Handles tab navigation, data loading, and CRUD operations
+ * Spreadsheet-style inline editing with drag-and-drop reordering
  */
 
 // ============================================================================
@@ -10,6 +10,16 @@
 let currentUserId = '';
 let autoRefreshInterval = null;
 let searchTimeout = null;
+
+// Track dirty state for save buttons
+let memoriesData = [];
+let memoriesDirty = false;
+let memoriesDeleted = [];
+
+let tasksData = [];
+let tasksDirty = false;
+let tasksDeleted = [];
+let tasksReordered = false;
 
 // ============================================================================
 // INITIALIZATION
@@ -75,7 +85,6 @@ function loadUsers() {
                     select.appendChild(option);
                 });
 
-                // Set default user (first one or from localStorage)
                 const savedUser = localStorage.getItem('selectedUserId');
                 if (savedUser && data.users.find(u => u.user_id === savedUser)) {
                     select.value = savedUser;
@@ -97,7 +106,6 @@ function onUserChange() {
     currentUserId = select.value;
     localStorage.setItem('selectedUserId', currentUserId);
 
-    // Reload current tab data
     const activeTab = document.querySelector('.tab-btn.active');
     if (activeTab) {
         const tabId = activeTab.dataset.tab;
@@ -131,17 +139,17 @@ function debounceSearch(callback) {
 }
 
 // ============================================================================
-// MEMORIES
+// MEMORIES - SPREADSHEET STYLE
 // ============================================================================
 
 function loadMemories() {
     const category = document.getElementById('memoryCategory').value;
     const search = document.getElementById('memorySearch').value;
     const loading = document.getElementById('memoriesLoading');
-    const list = document.getElementById('memoriesList');
+    const tbody = document.getElementById('memoriesList');
 
     loading.style.display = 'block';
-    list.innerHTML = '';
+    tbody.innerHTML = '';
 
     let url = `/api/memories?user_id=${encodeURIComponent(currentUserId)}`;
     if (category) url += `&category=${encodeURIComponent(category)}`;
@@ -153,28 +161,35 @@ function loadMemories() {
             loading.style.display = 'none';
 
             if (!data.success) {
-                list.innerHTML = `<div class="empty-state">Error: ${data.error}</div>`;
+                tbody.innerHTML = `<tr><td colspan="6" class="empty-state">Error: ${data.error}</td></tr>`;
                 return;
             }
+
+            memoriesData = data.memories;
+            memoriesDirty = false;
+            memoriesDeleted = [];
+            updateMemoriesSaveButton();
 
             if (data.memories.length === 0) {
-                list.innerHTML = '<div class="empty-state">No memories found. Click "+ Add Memory" to create one.</div>';
+                tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No memories found. Click "+ Add Row" to create one.</td></tr>';
                 return;
             }
 
-            data.memories.forEach(memory => {
-                list.appendChild(createMemoryCard(memory));
+            data.memories.forEach((memory, idx) => {
+                tbody.appendChild(createMemoryRow(memory, idx));
             });
         })
         .catch(e => {
             loading.style.display = 'none';
-            list.innerHTML = `<div class="empty-state">Error loading memories: ${e}</div>`;
+            tbody.innerHTML = `<tr><td colspan="6" class="empty-state">Error loading memories: ${e}</td></tr>`;
         });
 }
 
-function createMemoryCard(memory) {
-    const card = document.createElement('div');
-    card.className = 'data-card';
+function createMemoryRow(memory, idx) {
+    const tr = document.createElement('tr');
+    tr.dataset.idx = idx;
+    tr.dataset.key = memory.key;
+    tr.dataset.isNew = memory._isNew ? 'true' : 'false';
 
     let tags = [];
     try {
@@ -183,159 +198,193 @@ function createMemoryCard(memory) {
         tags = [];
     }
 
-    const confidencePercent = Math.round(memory.confidence * 100);
-
-    card.innerHTML = `
-        <div class="card-header">
-            <span class="category-badge category-${memory.category}">${memory.category}</span>
-            <span class="memory-key">${escapeHtml(memory.key)}</span>
-            <div class="card-actions">
-                <button class="btn btn-secondary btn-small" onclick="editMemory('${escapeHtml(memory.key)}')">Edit</button>
-                <button class="btn btn-danger btn-small" onclick="deleteMemory('${escapeHtml(memory.key)}')">Delete</button>
-            </div>
-        </div>
-        <div class="card-body">
-            <p class="memory-value">${escapeHtml(memory.value)}</p>
-        </div>
-        <div class="card-footer">
-            <div class="confidence-display">
-                <span>Confidence:</span>
-                <div class="progress-bar">
-                    <div class="progress-fill" style="width: ${confidencePercent}%"></div>
-                </div>
-                <span>${memory.confidence.toFixed(2)}</span>
-            </div>
-            <div class="tags">
-                ${tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}
-            </div>
-        </div>
+    tr.innerHTML = `
+        <td>
+            <select class="cell-input" data-field="category" onchange="markMemoryDirty(${idx})">
+                <option value="personal" ${memory.category === 'personal' ? 'selected' : ''}>Personal</option>
+                <option value="work" ${memory.category === 'work' ? 'selected' : ''}>Work</option>
+                <option value="preferences" ${memory.category === 'preferences' ? 'selected' : ''}>Preferences</option>
+                <option value="knowledge" ${memory.category === 'knowledge' ? 'selected' : ''}>Knowledge</option>
+                <option value="health" ${memory.category === 'health' ? 'selected' : ''}>Health</option>
+                <option value="finance" ${memory.category === 'finance' ? 'selected' : ''}>Finance</option>
+                <option value="relationships" ${memory.category === 'relationships' ? 'selected' : ''}>Relationships</option>
+                <option value="goals" ${memory.category === 'goals' ? 'selected' : ''}>Goals</option>
+                <option value="habits" ${memory.category === 'habits' ? 'selected' : ''}>Habits</option>
+            </select>
+        </td>
+        <td>
+            <input type="text" class="cell-input" data-field="key" value="${escapeHtml(memory.key)}"
+                   onchange="markMemoryDirty(${idx})" ${memory._isNew ? '' : 'readonly'}>
+        </td>
+        <td>
+            <textarea class="cell-input cell-textarea" data-field="value"
+                      onchange="markMemoryDirty(${idx})">${escapeHtml(memory.value)}</textarea>
+        </td>
+        <td>
+            <input type="range" class="cell-slider" data-field="confidence" min="0" max="100"
+                   value="${Math.round(memory.confidence * 100)}" onchange="markMemoryDirty(${idx})">
+            <span class="slider-value">${memory.confidence.toFixed(2)}</span>
+        </td>
+        <td>
+            <input type="text" class="cell-input" data-field="tags" value="${tags.join(', ')}"
+                   onchange="markMemoryDirty(${idx})" placeholder="tag1, tag2">
+        </td>
+        <td>
+            <button class="btn-icon btn-delete" onclick="deleteMemoryRow(${idx})" title="Delete">&#x2715;</button>
+        </td>
     `;
 
-    return card;
+    // Update slider display on input
+    const slider = tr.querySelector('input[type="range"]');
+    const sliderValue = tr.querySelector('.slider-value');
+    slider.addEventListener('input', () => {
+        sliderValue.textContent = (slider.value / 100).toFixed(2);
+    });
+
+    return tr;
 }
 
-function showAddMemoryModal() {
-    document.getElementById('memoryModalTitle').textContent = 'Add Memory';
-    document.getElementById('memoryEditKey').value = '';
-    document.getElementById('memoryFormCategory').value = 'knowledge';
-    document.getElementById('memoryFormKey').value = '';
-    document.getElementById('memoryFormValue').value = '';
-    document.getElementById('memoryFormConfidence').value = 80;
-    document.getElementById('memoryConfidenceDisplay').textContent = '0.80';
-    document.getElementById('memoryFormTags').value = '';
-
-    document.getElementById('memoryModal').classList.add('show');
-}
-
-function editMemory(key) {
-    // Find the memory in the list
-    fetch(`/api/memories?user_id=${encodeURIComponent(currentUserId)}`)
-        .then(r => r.json())
-        .then(data => {
-            if (!data.success) return;
-
-            const memory = data.memories.find(m => m.key === key);
-            if (!memory) return;
-
-            document.getElementById('memoryModalTitle').textContent = 'Edit Memory';
-            document.getElementById('memoryEditKey').value = memory.key;
-            document.getElementById('memoryFormCategory').value = memory.category;
-            document.getElementById('memoryFormKey').value = memory.key;
-            document.getElementById('memoryFormValue').value = memory.value;
-
-            const confidencePercent = Math.round(memory.confidence * 100);
-            document.getElementById('memoryFormConfidence').value = confidencePercent;
-            document.getElementById('memoryConfidenceDisplay').textContent = memory.confidence.toFixed(2);
-
-            let tags = [];
-            try {
-                tags = JSON.parse(memory.tags || '[]');
-            } catch (e) {
-                tags = [];
-            }
-            document.getElementById('memoryFormTags').value = tags.join(', ');
-
-            document.getElementById('memoryModal').classList.add('show');
-        });
-}
-
-function saveMemory() {
-    const editKey = document.getElementById('memoryEditKey').value;
-    const isEdit = !!editKey;
-
-    const tagsInput = document.getElementById('memoryFormTags').value;
-    const tags = tagsInput.split(',').map(t => t.trim()).filter(t => t);
-
-    const memoryData = {
+function addMemoryRow() {
+    const newMemory = {
         user_id: currentUserId,
-        category: document.getElementById('memoryFormCategory').value,
-        key: document.getElementById('memoryFormKey').value,
-        value: document.getElementById('memoryFormValue').value,
-        confidence: document.getElementById('memoryFormConfidence').value / 100,
-        tags: tags
+        category: 'knowledge',
+        key: '',
+        value: '',
+        confidence: 0.8,
+        tags: '[]',
+        _isNew: true,
+        _dirty: true
     };
 
-    const url = isEdit ? `/api/memories/${encodeURIComponent(editKey)}` : '/api/memories';
-    const method = isEdit ? 'PUT' : 'POST';
+    memoriesData.push(newMemory);
+    const tbody = document.getElementById('memoriesList');
 
-    fetch(url, {
-        method: method,
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(memoryData)
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            showToast(isEdit ? 'Memory updated' : 'Memory created', 'success');
-            closeModal('memoryModal');
-            loadMemories();
-        } else {
-            showToast('Error: ' + data.error, 'error');
-        }
-    })
-    .catch(e => {
-        showToast('Error: ' + e, 'error');
-    });
+    // Remove empty state message if present
+    if (tbody.querySelector('.empty-state')) {
+        tbody.innerHTML = '';
+    }
+
+    tbody.appendChild(createMemoryRow(newMemory, memoriesData.length - 1));
+    memoriesDirty = true;
+    updateMemoriesSaveButton();
+
+    // Focus the key input
+    const lastRow = tbody.lastElementChild;
+    lastRow.querySelector('input[data-field="key"]').focus();
 }
 
-function deleteMemory(key) {
-    if (!confirm('Archive this memory? It will be moved to the Archive sheet.')) return;
+function markMemoryDirty(idx) {
+    memoriesData[idx]._dirty = true;
+    memoriesDirty = true;
+    updateMemoriesSaveButton();
+}
 
-    fetch(`/api/memories/${encodeURIComponent(key)}?user_id=${encodeURIComponent(currentUserId)}`, {
-        method: 'DELETE'
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            showToast('Memory archived', 'success');
-            loadMemories();
-        } else {
-            showToast('Error: ' + data.error, 'error');
+function deleteMemoryRow(idx) {
+    const memory = memoriesData[idx];
+
+    if (!memory._isNew) {
+        memoriesDeleted.push(memory.key);
+    }
+
+    memoriesData.splice(idx, 1);
+    memoriesDirty = true;
+    updateMemoriesSaveButton();
+
+    // Re-render
+    const tbody = document.getElementById('memoriesList');
+    tbody.innerHTML = '';
+
+    if (memoriesData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No memories. Click "+ Add Row" to create one.</td></tr>';
+    } else {
+        memoriesData.forEach((m, i) => {
+            tbody.appendChild(createMemoryRow(m, i));
+        });
+    }
+}
+
+function updateMemoriesSaveButton() {
+    const btn = document.getElementById('saveMemoriesBtn');
+    btn.disabled = !memoriesDirty;
+    btn.textContent = memoriesDirty ? 'Save Changes *' : 'Save Changes';
+}
+
+async function saveAllMemories() {
+    const btn = document.getElementById('saveMemoriesBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    try {
+        // Delete memories first
+        for (const key of memoriesDeleted) {
+            await fetch(`/api/memories/${encodeURIComponent(key)}?user_id=${encodeURIComponent(currentUserId)}`, {
+                method: 'DELETE'
+            });
         }
-    })
-    .catch(e => {
-        showToast('Error: ' + e, 'error');
-    });
+
+        // Save new and updated memories
+        const rows = document.querySelectorAll('#memoriesList tr[data-idx]');
+        for (let i = 0; i < memoriesData.length; i++) {
+            const memory = memoriesData[i];
+            if (!memory._dirty) continue;
+
+            const row = rows[i];
+            if (!row) continue;
+
+            const tagsInput = row.querySelector('[data-field="tags"]').value;
+            const tags = tagsInput.split(',').map(t => t.trim()).filter(t => t);
+
+            const memoryData = {
+                user_id: currentUserId,
+                category: row.querySelector('[data-field="category"]').value,
+                key: row.querySelector('[data-field="key"]').value,
+                value: row.querySelector('[data-field="value"]').value,
+                confidence: row.querySelector('[data-field="confidence"]').value / 100,
+                tags: tags
+            };
+
+            if (!memoryData.key) continue;
+
+            if (memory._isNew) {
+                await fetch('/api/memories', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(memoryData)
+                });
+            } else {
+                await fetch(`/api/memories/${encodeURIComponent(memory.key)}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(memoryData)
+                });
+            }
+        }
+
+        showToast('Memories saved successfully', 'success');
+        loadMemories();
+    } catch (e) {
+        showToast('Error saving memories: ' + e, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Save Changes *';
+    }
 }
 
 // ============================================================================
-// TASKS
+// TASKS - SPREADSHEET STYLE WITH DRAG & DROP
 // ============================================================================
 
 function loadTasks() {
     const status = document.getElementById('taskStatus').value;
-    const priority = document.getElementById('taskPriority').value;
     const showArchived = document.getElementById('taskShowArchived').checked;
     const search = document.getElementById('taskSearch').value;
     const loading = document.getElementById('tasksLoading');
-    const list = document.getElementById('tasksList');
+    const tbody = document.getElementById('tasksList');
 
     loading.style.display = 'block';
-    list.innerHTML = '';
+    tbody.innerHTML = '';
 
     let url = `/api/tasks?user_id=${encodeURIComponent(currentUserId)}`;
     if (status) url += `&status=${encodeURIComponent(status)}`;
-    if (priority) url += `&priority=${encodeURIComponent(priority)}`;
     if (showArchived) url += '&archived=true';
     if (search) url += `&search=${encodeURIComponent(search)}`;
 
@@ -345,198 +394,328 @@ function loadTasks() {
             loading.style.display = 'none';
 
             if (!data.success) {
-                list.innerHTML = `<div class="empty-state">Error: ${data.error}</div>`;
+                tbody.innerHTML = `<tr><td colspan="8" class="empty-state">Error: ${data.error}</td></tr>`;
                 return;
             }
+
+            tasksData = data.tasks;
+            tasksDirty = false;
+            tasksDeleted = [];
+            tasksReordered = false;
+            updateTasksSaveButton();
 
             if (data.tasks.length === 0) {
-                list.innerHTML = '<div class="empty-state">No tasks found. Click "+ Add Task" to create one.</div>';
+                tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No tasks found. Click "+ Add Row" to create one.</td></tr>';
                 return;
             }
 
-            data.tasks.forEach(task => {
-                list.appendChild(createTaskCard(task));
+            data.tasks.forEach((task, idx) => {
+                tbody.appendChild(createTaskRow(task, idx));
             });
+
+            initTaskDragDrop();
         })
         .catch(e => {
             loading.style.display = 'none';
-            list.innerHTML = `<div class="empty-state">Error loading tasks: ${e}</div>`;
+            tbody.innerHTML = `<tr><td colspan="8" class="empty-state">Error loading tasks: ${e}</td></tr>`;
         });
 }
 
-function createTaskCard(task) {
-    const card = document.createElement('div');
-    card.className = `data-card task-card priority-${task.priority}`;
-    if (task.status === 'complete') card.classList.add('completed');
-    if (task.archived) card.classList.add('archived');
+function createTaskRow(task, idx) {
+    const tr = document.createElement('tr');
+    tr.dataset.idx = idx;
+    tr.dataset.taskId = task.task_id || '';
+    tr.dataset.isNew = task._isNew ? 'true' : 'false';
+    tr.draggable = true;
 
-    const deadlineStr = task.deadline ? formatDate(task.deadline) : 'No deadline';
-    const isOverdue = task.deadline && new Date(task.deadline) < new Date() && task.status !== 'complete';
+    if (task.status === 'complete') tr.classList.add('row-complete');
+    if (task.archived) tr.classList.add('row-archived');
 
-    card.innerHTML = `
-        <div class="card-header">
-            <div class="task-status">
-                <input type="checkbox" ${task.status === 'complete' ? 'checked' : ''}
-                       onchange="toggleTaskComplete('${task.task_id}', this.checked)">
-                <span class="task-title ${task.status === 'complete' ? 'strikethrough' : ''}">${escapeHtml(task.title)}</span>
-            </div>
-            <div class="card-actions">
-                <span class="priority-badge priority-${task.priority}">${task.priority}</span>
-                <button class="btn btn-secondary btn-small" onclick="editTask('${task.task_id}')">Edit</button>
-                <button class="btn btn-danger btn-small" onclick="archiveTask('${task.task_id}')">${task.archived ? 'Unarchive' : 'Archive'}</button>
-            </div>
-        </div>
-        ${task.description ? `<div class="card-body"><p>${escapeHtml(task.description)}</p></div>` : ''}
-        <div class="card-footer">
-            <div class="progress-section">
-                <span>Progress: ${task.progress_percent}%</span>
-                <div class="progress-bar">
-                    <div class="progress-fill" style="width: ${task.progress_percent}%"></div>
-                </div>
-            </div>
-            <div class="task-meta">
-                <span class="deadline ${isOverdue ? 'overdue' : ''}">${deadlineStr}</span>
-                ${task.is_recurring ? `<span class="recurring-badge">Recurring: ${escapeHtml(task.recurrence_pattern)}</span>` : ''}
-            </div>
-        </div>
+    // Format deadline for datetime-local input
+    let deadlineValue = '';
+    if (task.deadline) {
+        try {
+            const dt = new Date(task.deadline);
+            if (!isNaN(dt.getTime())) {
+                deadlineValue = dt.toISOString().slice(0, 16);
+            }
+        } catch (e) {}
+    }
+
+    tr.innerHTML = `
+        <td class="col-drag">
+            <span class="drag-handle" title="Drag to reorder">&#x2630;</span>
+        </td>
+        <td>
+            <input type="checkbox" class="cell-checkbox" data-field="status"
+                   ${task.status === 'complete' ? 'checked' : ''} onchange="markTaskDirty(${idx})">
+        </td>
+        <td>
+            <select class="cell-input cell-priority priority-${task.priority}" data-field="priority"
+                    onchange="markTaskDirty(${idx}); updatePriorityColor(this)">
+                <option value="critical" ${task.priority === 'critical' ? 'selected' : ''}>Critical</option>
+                <option value="high" ${task.priority === 'high' ? 'selected' : ''}>High</option>
+                <option value="medium" ${task.priority === 'medium' ? 'selected' : ''}>Medium</option>
+                <option value="low" ${task.priority === 'low' ? 'selected' : ''}>Low</option>
+            </select>
+        </td>
+        <td>
+            <input type="text" class="cell-input" data-field="title" value="${escapeHtml(task.title)}"
+                   onchange="markTaskDirty(${idx})" placeholder="Task title">
+        </td>
+        <td>
+            <textarea class="cell-input cell-textarea" data-field="description"
+                      onchange="markTaskDirty(${idx})" placeholder="Description">${escapeHtml(task.description)}</textarea>
+        </td>
+        <td>
+            <input type="range" class="cell-slider" data-field="progress_percent" min="0" max="100"
+                   value="${task.progress_percent}" onchange="markTaskDirty(${idx})">
+            <span class="slider-value">${task.progress_percent}%</span>
+        </td>
+        <td>
+            <input type="datetime-local" class="cell-input cell-datetime" data-field="deadline"
+                   value="${deadlineValue}" onchange="markTaskDirty(${idx})">
+        </td>
+        <td>
+            <button class="btn-icon btn-delete" onclick="deleteTaskRow(${idx})" title="Archive">&#x2715;</button>
+        </td>
     `;
 
-    return card;
+    // Update slider display on input
+    const slider = tr.querySelector('input[type="range"]');
+    const sliderValue = tr.querySelector('.slider-value');
+    slider.addEventListener('input', () => {
+        sliderValue.textContent = slider.value + '%';
+    });
+
+    return tr;
 }
 
-function showAddTaskModal() {
-    document.getElementById('taskModalTitle').textContent = 'Add Task';
-    document.getElementById('taskEditId').value = '';
-    document.getElementById('taskFormTitle').value = '';
-    document.getElementById('taskFormDescription').value = '';
-    document.getElementById('taskFormPriority').value = 'medium';
-    document.getElementById('taskFormDeadline').value = '';
-    document.getElementById('taskFormProgress').value = 0;
-    document.getElementById('taskProgressDisplay').textContent = '0';
-    document.getElementById('taskFormRecurring').checked = false;
-    document.getElementById('recurrenceGroup').style.display = 'none';
-    document.getElementById('taskFormRecurrence').value = '';
-    document.getElementById('taskFormNotes').value = '';
-
-    document.getElementById('taskModal').classList.add('show');
+function updatePriorityColor(select) {
+    select.className = 'cell-input cell-priority priority-' + select.value;
 }
 
-function editTask(taskId) {
-    fetch(`/api/tasks?user_id=${encodeURIComponent(currentUserId)}`)
-        .then(r => r.json())
-        .then(data => {
-            if (!data.success) return;
-
-            const task = data.tasks.find(t => t.task_id === taskId);
-            if (!task) return;
-
-            document.getElementById('taskModalTitle').textContent = 'Edit Task';
-            document.getElementById('taskEditId').value = task.task_id;
-            document.getElementById('taskFormTitle').value = task.title;
-            document.getElementById('taskFormDescription').value = task.description;
-            document.getElementById('taskFormPriority').value = task.priority;
-            document.getElementById('taskFormProgress').value = task.progress_percent;
-            document.getElementById('taskProgressDisplay').textContent = task.progress_percent;
-            document.getElementById('taskFormRecurring').checked = task.is_recurring;
-            document.getElementById('recurrenceGroup').style.display = task.is_recurring ? 'block' : 'none';
-            document.getElementById('taskFormRecurrence').value = task.recurrence_pattern;
-            document.getElementById('taskFormNotes').value = task.notes;
-
-            // Format deadline for datetime-local input
-            if (task.deadline) {
-                const dt = new Date(task.deadline);
-                const formatted = dt.toISOString().slice(0, 16);
-                document.getElementById('taskFormDeadline').value = formatted;
-            } else {
-                document.getElementById('taskFormDeadline').value = '';
-            }
-
-            document.getElementById('taskModal').classList.add('show');
-        });
-}
-
-function saveTask() {
-    const editId = document.getElementById('taskEditId').value;
-    const isEdit = !!editId;
-
-    const taskData = {
+function addTaskRow() {
+    const newTask = {
         user_id: currentUserId,
-        title: document.getElementById('taskFormTitle').value,
-        description: document.getElementById('taskFormDescription').value,
-        priority: document.getElementById('taskFormPriority').value,
-        deadline: document.getElementById('taskFormDeadline').value,
-        progress_percent: parseInt(document.getElementById('taskFormProgress').value),
-        is_recurring: document.getElementById('taskFormRecurring').checked,
-        recurrence_pattern: document.getElementById('taskFormRecurrence').value,
-        notes: document.getElementById('taskFormNotes').value
+        task_id: '',
+        title: '',
+        description: '',
+        priority: 'medium',
+        status: 'pending',
+        deadline: '',
+        progress_percent: 0,
+        _isNew: true,
+        _dirty: true
     };
 
-    const url = isEdit ? `/api/tasks/${encodeURIComponent(editId)}` : '/api/tasks';
-    const method = isEdit ? 'PUT' : 'POST';
+    // Add at the beginning (highest priority position)
+    tasksData.unshift(newTask);
+    const tbody = document.getElementById('tasksList');
 
-    fetch(url, {
-        method: method,
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(taskData)
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            showToast(isEdit ? 'Task updated' : 'Task created', 'success');
-            closeModal('taskModal');
-            loadTasks();
-        } else {
-            showToast('Error: ' + data.error, 'error');
-        }
-    })
-    .catch(e => {
-        showToast('Error: ' + e, 'error');
+    if (tbody.querySelector('.empty-state')) {
+        tbody.innerHTML = '';
+    }
+
+    // Re-render all rows with updated indices
+    tbody.innerHTML = '';
+    tasksData.forEach((task, idx) => {
+        tbody.appendChild(createTaskRow(task, idx));
+    });
+
+    tasksDirty = true;
+    updateTasksSaveButton();
+    initTaskDragDrop();
+
+    // Focus the title input
+    tbody.querySelector('input[data-field="title"]').focus();
+}
+
+function markTaskDirty(idx) {
+    tasksData[idx]._dirty = true;
+    tasksDirty = true;
+    updateTasksSaveButton();
+
+    // Update row styling based on checkbox
+    const row = document.querySelector(`#tasksList tr[data-idx="${idx}"]`);
+    if (row) {
+        const checkbox = row.querySelector('[data-field="status"]');
+        row.classList.toggle('row-complete', checkbox.checked);
+    }
+}
+
+function deleteTaskRow(idx) {
+    const task = tasksData[idx];
+
+    if (!task._isNew && task.task_id) {
+        tasksDeleted.push(task.task_id);
+    }
+
+    tasksData.splice(idx, 1);
+    tasksDirty = true;
+    updateTasksSaveButton();
+
+    // Re-render
+    const tbody = document.getElementById('tasksList');
+    tbody.innerHTML = '';
+
+    if (tasksData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No tasks. Click "+ Add Row" to create one.</td></tr>';
+    } else {
+        tasksData.forEach((t, i) => {
+            tbody.appendChild(createTaskRow(t, i));
+        });
+        initTaskDragDrop();
+    }
+}
+
+function updateTasksSaveButton() {
+    const btn = document.getElementById('saveTasksBtn');
+    const hasChanges = tasksDirty || tasksReordered;
+    btn.disabled = !hasChanges;
+    btn.textContent = hasChanges ? 'Save Changes *' : 'Save Changes';
+}
+
+// ============================================================================
+// DRAG AND DROP FOR TASKS
+// ============================================================================
+
+let draggedRow = null;
+
+function initTaskDragDrop() {
+    const tbody = document.getElementById('tasksList');
+    const rows = tbody.querySelectorAll('tr[draggable="true"]');
+
+    rows.forEach(row => {
+        row.addEventListener('dragstart', handleDragStart);
+        row.addEventListener('dragend', handleDragEnd);
+        row.addEventListener('dragover', handleDragOver);
+        row.addEventListener('drop', handleDrop);
+        row.addEventListener('dragenter', handleDragEnter);
+        row.addEventListener('dragleave', handleDragLeave);
     });
 }
 
-function toggleTaskComplete(taskId, isComplete) {
-    const url = isComplete ?
-        `/api/tasks/${encodeURIComponent(taskId)}/complete` :
-        `/api/tasks/${encodeURIComponent(taskId)}`;
+function handleDragStart(e) {
+    draggedRow = this;
+    this.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', this.innerHTML);
+}
 
-    const body = isComplete ?
-        { user_id: currentUserId } :
-        { user_id: currentUserId, status: 'pending', progress_percent: 0 };
-
-    fetch(url, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(body)
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            showToast(isComplete ? 'Task completed' : 'Task reopened', 'success');
-            loadTasks();
-        } else {
-            showToast('Error: ' + data.error, 'error');
-        }
+function handleDragEnd(e) {
+    this.classList.remove('dragging');
+    document.querySelectorAll('#tasksList tr').forEach(row => {
+        row.classList.remove('drag-over');
     });
 }
 
-function archiveTask(taskId) {
-    fetch(`/api/tasks/${encodeURIComponent(taskId)}?user_id=${encodeURIComponent(currentUserId)}`, {
-        method: 'DELETE'
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            showToast('Task archived', 'success');
-            loadTasks();
-        } else {
-            showToast('Error: ' + data.error, 'error');
-        }
-    });
+function handleDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
 }
 
-function toggleRecurringField() {
-    const isRecurring = document.getElementById('taskFormRecurring').checked;
-    document.getElementById('recurrenceGroup').style.display = isRecurring ? 'block' : 'none';
+function handleDragEnter(e) {
+    this.classList.add('drag-over');
+}
+
+function handleDragLeave(e) {
+    this.classList.remove('drag-over');
+}
+
+function handleDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (draggedRow !== this) {
+        const tbody = document.getElementById('tasksList');
+        const rows = Array.from(tbody.querySelectorAll('tr[data-idx]'));
+        const fromIdx = parseInt(draggedRow.dataset.idx);
+        const toIdx = parseInt(this.dataset.idx);
+
+        // Reorder in data array
+        const [moved] = tasksData.splice(fromIdx, 1);
+        tasksData.splice(toIdx, 0, moved);
+
+        // Mark all as needing priority update
+        tasksData.forEach((task, i) => {
+            task._newOrder = i;
+        });
+
+        tasksReordered = true;
+        updateTasksSaveButton();
+
+        // Re-render
+        tbody.innerHTML = '';
+        tasksData.forEach((task, idx) => {
+            tbody.appendChild(createTaskRow(task, idx));
+        });
+        initTaskDragDrop();
+    }
+
+    this.classList.remove('drag-over');
+}
+
+async function saveAllTasks() {
+    const btn = document.getElementById('saveTasksBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    try {
+        // Archive deleted tasks
+        for (const taskId of tasksDeleted) {
+            await fetch(`/api/tasks/${encodeURIComponent(taskId)}?user_id=${encodeURIComponent(currentUserId)}`, {
+                method: 'DELETE'
+            });
+        }
+
+        // Save tasks in order (position = priority)
+        const rows = document.querySelectorAll('#tasksList tr[data-idx]');
+        const priorityMap = {0: 'critical', 1: 'critical', 2: 'high', 3: 'high'};
+
+        for (let i = 0; i < tasksData.length; i++) {
+            const task = tasksData[i];
+            const row = rows[i];
+            if (!row) continue;
+
+            // Calculate priority based on position if reordered
+            let priority = row.querySelector('[data-field="priority"]').value;
+
+            const checkbox = row.querySelector('[data-field="status"]');
+            const taskData = {
+                user_id: currentUserId,
+                title: row.querySelector('[data-field="title"]').value,
+                description: row.querySelector('[data-field="description"]').value,
+                priority: priority,
+                status: checkbox.checked ? 'complete' : 'pending',
+                deadline: row.querySelector('[data-field="deadline"]').value,
+                progress_percent: parseInt(row.querySelector('[data-field="progress_percent"]').value)
+            };
+
+            if (!taskData.title) continue;
+
+            if (task._isNew) {
+                await fetch('/api/tasks', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(taskData)
+                });
+            } else if (task._dirty || tasksReordered) {
+                await fetch(`/api/tasks/${encodeURIComponent(task.task_id)}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(taskData)
+                });
+            }
+        }
+
+        showToast('Tasks saved successfully', 'success');
+        loadTasks();
+    } catch (e) {
+        showToast('Error saving tasks: ' + e, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Save Changes *';
+    }
 }
 
 // ============================================================================
@@ -592,7 +771,6 @@ function loadConversations() {
                 grouped[conv.session_id].push(conv);
             });
 
-            // Render grouped conversations
             Object.keys(grouped).forEach(sessionId => {
                 const sessionDiv = document.createElement('div');
                 sessionDiv.className = 'conversation-session';
@@ -605,7 +783,6 @@ function loadConversations() {
                 const messages = document.createElement('div');
                 messages.className = 'session-messages';
 
-                // Sort messages by timestamp ascending within session
                 grouped[sessionId].sort((a, b) =>
                     new Date(a.timestamp) - new Date(b.timestamp)
                 );
@@ -685,34 +862,11 @@ function updateStatus() {
 }
 
 // ============================================================================
-// MODAL HELPERS
-// ============================================================================
-
-function closeModal(modalId) {
-    document.getElementById(modalId).classList.remove('show');
-}
-
-// Close modal on outside click
-document.addEventListener('click', function(e) {
-    if (e.target.classList.contains('modal')) {
-        e.target.classList.remove('show');
-    }
-});
-
-// Close modal on escape key
-document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') {
-        document.querySelectorAll('.modal.show').forEach(modal => {
-            modal.classList.remove('show');
-        });
-    }
-});
-
-// ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
 
 function escapeHtml(text) {
+    if (!text) return '';
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;

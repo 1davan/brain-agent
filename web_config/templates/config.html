@@ -210,11 +210,26 @@
                             <option value="habits">Habits</option>
                         </select>
                         <input type="text" id="memorySearch" placeholder="Search..." onkeyup="debounceSearch(loadMemories)">
-                        <button class="btn btn-primary btn-small" onclick="showAddMemoryModal()">+ Add Memory</button>
+                        <button class="btn btn-secondary btn-small" onclick="addMemoryRow()">+ Add Row</button>
+                        <button class="btn btn-primary btn-small" id="saveMemoriesBtn" onclick="saveAllMemories()" disabled>Save Changes</button>
                     </div>
                 </div>
                 <div id="memoriesLoading" class="loading">Loading memories...</div>
-                <div id="memoriesList" class="data-list"></div>
+                <div class="spreadsheet-container">
+                    <table class="spreadsheet" id="memoriesTable">
+                        <thead>
+                            <tr>
+                                <th class="col-category">Category</th>
+                                <th class="col-key">Key</th>
+                                <th class="col-value">Value</th>
+                                <th class="col-confidence">Confidence</th>
+                                <th class="col-tags">Tags</th>
+                                <th class="col-actions"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="memoriesList"></tbody>
+                    </table>
+                </div>
             </section>
         </div>
 
@@ -231,22 +246,33 @@
                             <option value="pending">Pending</option>
                             <option value="complete">Complete</option>
                         </select>
-                        <select id="taskPriority" onchange="loadTasks()">
-                            <option value="">All Priority</option>
-                            <option value="critical">Critical</option>
-                            <option value="high">High</option>
-                            <option value="medium">Medium</option>
-                            <option value="low">Low</option>
-                        </select>
                         <label class="checkbox-inline">
                             <input type="checkbox" id="taskShowArchived" onchange="loadTasks()"> Archived
                         </label>
                         <input type="text" id="taskSearch" placeholder="Search..." onkeyup="debounceSearch(loadTasks)">
-                        <button class="btn btn-primary btn-small" onclick="showAddTaskModal()">+ Add Task</button>
+                        <button class="btn btn-secondary btn-small" onclick="addTaskRow()">+ Add Row</button>
+                        <button class="btn btn-primary btn-small" id="saveTasksBtn" onclick="saveAllTasks()" disabled>Save Changes</button>
                     </div>
                 </div>
+                <p class="section-desc">Drag rows to reorder priority. Higher rows = higher priority.</p>
                 <div id="tasksLoading" class="loading">Loading tasks...</div>
-                <div id="tasksList" class="data-list"></div>
+                <div class="spreadsheet-container">
+                    <table class="spreadsheet" id="tasksTable">
+                        <thead>
+                            <tr>
+                                <th class="col-drag"></th>
+                                <th class="col-done">Done</th>
+                                <th class="col-priority">Priority</th>
+                                <th class="col-title">Title</th>
+                                <th class="col-description">Description</th>
+                                <th class="col-progress">Progress</th>
+                                <th class="col-deadline">Deadline</th>
+                                <th class="col-actions"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="tasksList"></tbody>
+                    </table>
+                </div>
             </section>
         </div>
 
@@ -284,117 +310,6 @@
                 </div>
                 <pre id="logViewer" class="log-viewer">Click "Refresh Logs" to view bot output...</pre>
             </section>
-        </div>
-    </div>
-
-    <!-- ============================================================ -->
-    <!-- ADD MEMORY MODAL -->
-    <!-- ============================================================ -->
-    <div id="memoryModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 id="memoryModalTitle">Add Memory</h3>
-                <button class="modal-close" onclick="closeModal('memoryModal')">&times;</button>
-            </div>
-            <div class="modal-body">
-                <input type="hidden" id="memoryEditKey">
-                <div class="form-group">
-                    <label>Category</label>
-                    <select id="memoryFormCategory">
-                        <option value="personal">Personal</option>
-                        <option value="work">Work</option>
-                        <option value="preferences">Preferences</option>
-                        <option value="knowledge" selected>Knowledge</option>
-                        <option value="health">Health</option>
-                        <option value="finance">Finance</option>
-                        <option value="relationships">Relationships</option>
-                        <option value="goals">Goals</option>
-                        <option value="habits">Habits</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Key (short identifier)</label>
-                    <input type="text" id="memoryFormKey" placeholder="e.g., favorite_color">
-                </div>
-                <div class="form-group">
-                    <label>Value (memory content)</label>
-                    <textarea id="memoryFormValue" rows="4" placeholder="What should be remembered..."></textarea>
-                </div>
-                <div class="form-group">
-                    <label>Confidence: <span id="memoryConfidenceDisplay">0.8</span></label>
-                    <input type="range" id="memoryFormConfidence" min="0" max="100" value="80"
-                           oninput="document.getElementById('memoryConfidenceDisplay').textContent = (this.value/100).toFixed(2)">
-                </div>
-                <div class="form-group">
-                    <label>Tags (comma-separated)</label>
-                    <input type="text" id="memoryFormTags" placeholder="tag1, tag2, tag3">
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeModal('memoryModal')">Cancel</button>
-                <button class="btn btn-primary" onclick="saveMemory()">Save Memory</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- ============================================================ -->
-    <!-- ADD TASK MODAL -->
-    <!-- ============================================================ -->
-    <div id="taskModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 id="taskModalTitle">Add Task</h3>
-                <button class="modal-close" onclick="closeModal('taskModal')">&times;</button>
-            </div>
-            <div class="modal-body">
-                <input type="hidden" id="taskEditId">
-                <div class="form-group">
-                    <label>Title</label>
-                    <input type="text" id="taskFormTitle" placeholder="Task title">
-                </div>
-                <div class="form-group">
-                    <label>Description</label>
-                    <textarea id="taskFormDescription" rows="3" placeholder="Task description..."></textarea>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Priority</label>
-                        <select id="taskFormPriority">
-                            <option value="low">Low</option>
-                            <option value="medium" selected>Medium</option>
-                            <option value="high">High</option>
-                            <option value="critical">Critical</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Deadline</label>
-                        <input type="datetime-local" id="taskFormDeadline">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>Progress: <span id="taskProgressDisplay">0</span>%</label>
-                    <input type="range" id="taskFormProgress" min="0" max="100" value="0"
-                           oninput="document.getElementById('taskProgressDisplay').textContent = this.value">
-                </div>
-                <div class="form-group checkbox-group">
-                    <label>
-                        <input type="checkbox" id="taskFormRecurring" onchange="toggleRecurringField()">
-                        Recurring task
-                    </label>
-                </div>
-                <div class="form-group" id="recurrenceGroup" style="display: none;">
-                    <label>Recurrence Pattern</label>
-                    <input type="text" id="taskFormRecurrence" placeholder="e.g., daily, weekly, every monday">
-                </div>
-                <div class="form-group">
-                    <label>Notes</label>
-                    <textarea id="taskFormNotes" rows="2" placeholder="Additional notes..."></textarea>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeModal('taskModal')">Cancel</button>
-                <button class="btn btn-primary" onclick="saveTask()">Save Task</button>
-            </div>
         </div>
     </div>
 
