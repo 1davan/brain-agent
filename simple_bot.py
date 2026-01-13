@@ -1390,15 +1390,37 @@ CONFIGURE:
 
         elif command == '/summary':
             # Trigger immediate daily summary
-            return self._send_summary_command(user_id, chat_id)
+            # Get chat_id from known_users
+            chat_id = None
+            for uid, cid in self.known_users:
+                if uid == user_id:
+                    chat_id = cid
+                    break
+            if chat_id:
+                return self._send_summary_command(user_id, chat_id)
+            return "Error: Could not find your chat. Please send a message first."
 
         elif command == '/deadlines':
             # Show upcoming deadlines
-            return self._show_deadlines_command(user_id, chat_id)
+            chat_id = None
+            for uid, cid in self.known_users:
+                if uid == user_id:
+                    chat_id = cid
+                    break
+            if chat_id:
+                return self._show_deadlines_command(user_id, chat_id)
+            return "Error: Could not find your chat. Please send a message first."
 
         elif command == '/archive':
             # Run auto-archive now
-            return self._run_archive_command(user_id, chat_id)
+            chat_id = None
+            for uid, cid in self.known_users:
+                if uid == user_id:
+                    chat_id = cid
+                    break
+            if chat_id:
+                return self._run_archive_command(user_id, chat_id)
+            return "Error: Could not find your chat. Please send a message first."
 
         return None  # Not a recognized command, process normally
 
