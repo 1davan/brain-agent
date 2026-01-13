@@ -30,6 +30,7 @@
             <button class="tab-btn" data-tab="memories">Memories</button>
             <button class="tab-btn" data-tab="tasks">Tasks</button>
             <button class="tab-btn" data-tab="conversations">Conversations</button>
+            <button class="tab-btn" data-tab="commands">Commands</button>
             <button class="tab-btn" data-tab="logs">Logs</button>
         </nav>
 
@@ -293,6 +294,90 @@
                 <div id="conversationsLoading" class="loading">Loading conversations...</div>
                 <div id="conversationsList" class="conversation-list"></div>
             </section>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- COMMANDS TAB -->
+        <!-- ============================================================ -->
+        <div id="tab-commands" class="tab-content">
+            <div class="commands-grid">
+                <!-- Proactive Features -->
+                <section class="card">
+                    <h2>Proactive Features</h2>
+                    <p class="section-desc">Manually trigger bot messages to the selected user.</p>
+                    <div class="command-buttons">
+                        <button class="btn btn-primary command-btn" onclick="triggerCheckin()" id="btnCheckin">
+                            Send Check-in Now
+                        </button>
+                        <button class="btn btn-primary command-btn" onclick="triggerDailySummary()" id="btnSummary">
+                            Send Daily Summary
+                        </button>
+                    </div>
+                </section>
+
+                <!-- Session Management -->
+                <section class="card">
+                    <h2>Session Management</h2>
+                    <p class="section-desc">Manage active task discussion sessions.</p>
+                    <div class="command-buttons">
+                        <button class="btn btn-secondary command-btn" onclick="clearSession()" id="btnClearSession">
+                            Clear Session
+                        </button>
+                    </div>
+                </section>
+
+                <!-- System Actions -->
+                <section class="card">
+                    <h2>System Actions</h2>
+                    <p class="section-desc">Run maintenance tasks manually.</p>
+                    <div class="command-buttons">
+                        <button class="btn btn-secondary command-btn" onclick="runAutoArchive()" id="btnArchive">
+                            Run Auto-Archive
+                        </button>
+                        <button class="btn btn-secondary command-btn" onclick="processRecurring()" id="btnRecurring">
+                            Process Recurring
+                        </button>
+                        <button class="btn btn-secondary command-btn" onclick="checkDeadlines()" id="btnDeadlines">
+                            Check Deadlines
+                        </button>
+                    </div>
+                </section>
+
+                <!-- Send Message -->
+                <section class="card">
+                    <h2>Send Message</h2>
+                    <p class="section-desc">Send a custom message to the selected user via Telegram.</p>
+                    <div class="form-group">
+                        <textarea id="customMessage" rows="3" placeholder="Type your message here..."></textarea>
+                    </div>
+                    <button class="btn btn-primary" onclick="sendCustomMessage()" id="btnSendMessage">
+                        Send to User
+                    </button>
+                </section>
+
+                <!-- Quick Stats -->
+                <section class="card card-full-width">
+                    <h2>Quick Stats</h2>
+                    <div class="stats-grid" id="commandStats">
+                        <div class="stat-item">
+                            <span class="stat-label">Bot Status</span>
+                            <span class="stat-value" id="statBotStatus">--</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Check-in Hours</span>
+                            <span class="stat-value" id="statCheckinHours">--</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Current Hour (Brisbane)</span>
+                            <span class="stat-value" id="statCurrentHour">--</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Pending Tasks</span>
+                            <span class="stat-value" id="statPendingTasks">--</span>
+                        </div>
+                    </div>
+                </section>
+            </div>
         </div>
 
         <!-- ============================================================ -->

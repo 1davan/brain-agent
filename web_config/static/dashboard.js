@@ -61,6 +61,7 @@ function switchTab(tabId) {
     if (tabId === 'memories') loadMemories();
     else if (tabId === 'tasks') loadTasks();
     else if (tabId === 'conversations') loadConversations();
+    else if (tabId === 'commands') loadCommandStats();
     else if (tabId === 'logs') refreshLogs();
 }
 
@@ -884,4 +885,252 @@ function formatDate(dateStr) {
         hour: '2-digit',
         minute: '2-digit'
     });
+}
+
+// ============================================================================
+// BOT COMMANDS
+// ============================================================================
+
+async function triggerCheckin() {
+    const btn = document.getElementById('btnCheckin');
+    if (!currentUserId) {
+        showToast('Please select a user first', 'error');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+
+    try {
+        const response = await fetch('/api/commands/checkin', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({user_id: currentUserId})
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            showToast('Check-in sent successfully', 'success');
+        } else {
+            showToast('Error: ' + (data.error || 'Unknown error'), 'error');
+        }
+    } catch (e) {
+        showToast('Failed to send check-in: ' + e, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Send Check-in Now';
+    }
+}
+
+async function triggerDailySummary() {
+    const btn = document.getElementById('btnSummary');
+    if (!currentUserId) {
+        showToast('Please select a user first', 'error');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+
+    try {
+        const response = await fetch('/api/commands/daily-summary', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({user_id: currentUserId})
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            showToast('Daily summary sent successfully', 'success');
+        } else {
+            showToast('Error: ' + (data.error || 'Unknown error'), 'error');
+        }
+    } catch (e) {
+        showToast('Failed to send summary: ' + e, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Send Daily Summary';
+    }
+}
+
+async function clearSession() {
+    const btn = document.getElementById('btnClearSession');
+    if (!currentUserId) {
+        showToast('Please select a user first', 'error');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Clearing...';
+
+    try {
+        const response = await fetch('/api/commands/clear-session', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({user_id: currentUserId})
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            showToast('Session cleared', 'success');
+        } else {
+            showToast('Error: ' + (data.error || 'Unknown error'), 'error');
+        }
+    } catch (e) {
+        showToast('Failed to clear session: ' + e, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Clear Session';
+    }
+}
+
+async function runAutoArchive() {
+    const btn = document.getElementById('btnArchive');
+    if (!currentUserId) {
+        showToast('Please select a user first', 'error');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Running...';
+
+    try {
+        const response = await fetch('/api/commands/auto-archive', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({user_id: currentUserId})
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            showToast(`Archived ${data.archived_count} task(s)`, 'success');
+        } else {
+            showToast('Error: ' + (data.error || 'Unknown error'), 'error');
+        }
+    } catch (e) {
+        showToast('Failed to run auto-archive: ' + e, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Run Auto-Archive';
+    }
+}
+
+async function processRecurring() {
+    const btn = document.getElementById('btnRecurring');
+    if (!currentUserId) {
+        showToast('Please select a user first', 'error');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Processing...';
+
+    try {
+        const response = await fetch('/api/commands/process-recurring', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({user_id: currentUserId})
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            showToast(data.message || 'Recurring tasks processed', 'success');
+        } else {
+            showToast('Error: ' + (data.error || 'Unknown error'), 'error');
+        }
+    } catch (e) {
+        showToast('Failed to process recurring: ' + e, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Process Recurring';
+    }
+}
+
+async function checkDeadlines() {
+    const btn = document.getElementById('btnDeadlines');
+    if (!currentUserId) {
+        showToast('Please select a user first', 'error');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Checking...';
+
+    try {
+        const response = await fetch('/api/commands/check-deadlines', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({user_id: currentUserId})
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            showToast(`Sent ${data.reminders_sent} deadline reminder(s)`, 'success');
+        } else {
+            showToast('Error: ' + (data.error || 'Unknown error'), 'error');
+        }
+    } catch (e) {
+        showToast('Failed to check deadlines: ' + e, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Check Deadlines';
+    }
+}
+
+async function sendCustomMessage() {
+    const btn = document.getElementById('btnSendMessage');
+    const textarea = document.getElementById('customMessage');
+    const message = textarea.value.trim();
+
+    if (!currentUserId) {
+        showToast('Please select a user first', 'error');
+        return;
+    }
+
+    if (!message) {
+        showToast('Please enter a message', 'error');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+
+    try {
+        const response = await fetch('/api/commands/send-message', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({user_id: currentUserId, message: message})
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            showToast('Message sent successfully', 'success');
+            textarea.value = '';
+        } else {
+            showToast('Error: ' + (data.error || 'Unknown error'), 'error');
+        }
+    } catch (e) {
+        showToast('Failed to send message: ' + e, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Send to User';
+    }
+}
+
+async function loadCommandStats() {
+    if (!currentUserId) return;
+
+    try {
+        const response = await fetch(`/api/commands/stats?user_id=${encodeURIComponent(currentUserId)}`);
+        const data = await response.json();
+
+        if (data.success) {
+            document.getElementById('statBotStatus').textContent = data.bot_status || '--';
+            document.getElementById('statCheckinHours').textContent = data.checkin_hours || '--';
+            document.getElementById('statCurrentHour').textContent = data.current_hour || '--';
+            document.getElementById('statPendingTasks').textContent = data.pending_tasks || '0';
+        }
+    } catch (e) {
+        console.error('Failed to load command stats:', e);
+    }
 }

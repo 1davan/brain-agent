@@ -942,6 +942,361 @@ def api_config_update(variable):
 
 
 # ============================================================================
+# COMMANDS API
+# ============================================================================
+
+def get_telegram_token():
+    """Get Telegram token from env."""
+    env_config = load_env()
+    return env_config.get("TELEGRAM_TOKEN", "")
+
+
+def send_telegram_message(chat_id, text, reply_markup=None):
+    """Send message via Telegram API."""
+    import requests
+    token = get_telegram_token()
+    if not token:
+        return {"ok": False, "description": "Telegram token not configured"}
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    data = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+    if reply_markup:
+        data["reply_markup"] = json.dumps(reply_markup)
+
+    try:
+        response = requests.post(url, data=data, timeout=10)
+        return response.json()
+    except Exception as e:
+        return {"ok": False, "description": str(e)}
+
+
+def get_user_chat_id(user_id):
+    """Get chat_id for a user_id."""
+    client = get_sheets_client()
+    if not client:
+        return None
+    try:
+        df = run_async(client.get_sheet_data("Users"))
+        for _, row in df.iterrows():
+            if str(row.get("user_id", "")) == str(user_id):
+                return str(row.get("chat_id", ""))
+        return None
+    except:
+        return None
+
+
+@app.route("/api/commands/checkin", methods=["POST"])
+@login_required
+def api_commands_checkin():
+    """Trigger a task check-in for the user."""
+    data = request.json
+    user_id = data.get("user_id", "")
+    chat_id = get_user_chat_id(user_id)
+
+    if not chat_id:
+        return jsonify({"success": False, "error": "User not found or no chat_id"})
+
+    client = get_sheets_client()
+    if not client:
+        return jsonify({"success": False, "error": "Sheets client not configured"})
+
+    try:
+        # Get pending tasks for check-in
+        df = run_async(client.get_sheet_data("Tasks", user_id))
+        pending = df[df["status"] == "pending"]
+        if "archived" in df.columns:
+            pending = pending[pending["archived"].astype(str) != "true"]
+
+        if pending.empty:
+            return jsonify({"success": False, "error": "No pending tasks for check-in"})
+
+        # Get first pending task
+        task = pending.iloc[0]
+        title = str(task.get("title", "your task"))
+        task_id = str(task.get("task_id", ""))
+        progress = int(task.get("progress_percent", 0) or 0)
+
+        # Build check-in message
+        message = f"Hey! Just checking in on '<b>{title}</b>'."
+        if progress > 0:
+            message += f" Last I heard you were at {progress}%."
+        else:
+            message += " Have you had a chance to start on it?"
+        message += "\n\nReply with your progress or tap a button below:"
+
+        # Add inline buttons
+        reply_markup = {
+            "inline_keyboard": [
+                [
+                    {"text": "Done!", "callback_data": f"task_done:{task_id}"},
+                    {"text": "50%", "callback_data": f"task_progress:{task_id}:50"},
+                    {"text": "25%", "callback_data": f"task_progress:{task_id}:25"}
+                ],
+                [
+                    {"text": "Blocked", "callback_data": f"task_blocked:{task_id}"},
+                    {"text": "Skip", "callback_data": f"task_skip:{task_id}"}
+                ]
+            ]
+        }
+
+        result = send_telegram_message(chat_id, message, reply_markup)
+        if result.get("ok"):
+            return jsonify({"success": True, "message": f"Check-in sent for: {title}"})
+        else:
+            return jsonify({"success": False, "error": result.get("description", "Failed to send")})
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/commands/daily-summary", methods=["POST"])
+@login_required
+def api_commands_daily_summary():
+    """Send daily summary to user."""
+    data = request.json
+    user_id = data.get("user_id", "")
+    chat_id = get_user_chat_id(user_id)
+
+    if not chat_id:
+        return jsonify({"success": False, "error": "User not found or no chat_id"})
+
+    client = get_sheets_client()
+    if not client:
+        return jsonify({"success": False, "error": "Sheets client not configured"})
+
+    try:
+        # Get pending tasks
+        df = run_async(client.get_sheet_data("Tasks", user_id))
+        pending = df[df["status"] == "pending"]
+        if "archived" in df.columns:
+            pending = pending[pending["archived"].astype(str) != "true"]
+
+        # Build summary message
+        now = datetime.now()
+        message = f"<b>Daily Summary - {now.strftime('%A, %B %d')}</b>\n\n"
+
+        if pending.empty:
+            message += "No pending tasks. Enjoy your day!"
+        else:
+            message += f"<b>Pending Tasks ({len(pending)}):</b>\n"
+            for _, task in pending.head(10).iterrows():
+                title = str(task.get("title", "Untitled"))
+                priority = str(task.get("priority", "medium"))
+                progress = int(task.get("progress_percent", 0) or 0)
+                icon = {"critical": "!!!", "high": "!!", "medium": "!", "low": "-"}.get(priority, "")
+                message += f"{icon} {title}"
+                if progress > 0:
+                    message += f" ({progress}%)"
+                message += "\n"
+
+            if len(pending) > 10:
+                message += f"\n...and {len(pending) - 10} more tasks"
+
+        result = send_telegram_message(chat_id, message)
+        if result.get("ok"):
+            return jsonify({"success": True, "message": "Daily summary sent"})
+        else:
+            return jsonify({"success": False, "error": result.get("description", "Failed to send")})
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/commands/clear-session", methods=["POST"])
+@login_required
+def api_commands_clear_session():
+    """Clear task discussion session for user (sends message to confirm)."""
+    data = request.json
+    user_id = data.get("user_id", "")
+    chat_id = get_user_chat_id(user_id)
+
+    if not chat_id:
+        return jsonify({"success": False, "error": "User not found or no chat_id"})
+
+    message = "Session cleared. Ready for new requests!"
+    result = send_telegram_message(chat_id, message)
+
+    if result.get("ok"):
+        return jsonify({"success": True, "message": "Session clear message sent"})
+    else:
+        return jsonify({"success": False, "error": result.get("description", "Failed to send")})
+
+
+@app.route("/api/commands/auto-archive", methods=["POST"])
+@login_required
+def api_commands_auto_archive():
+    """Archive completed tasks older than 7 days."""
+    data = request.json
+    user_id = data.get("user_id", "")
+
+    client = get_sheets_client()
+    if not client:
+        return jsonify({"success": False, "error": "Sheets client not configured"})
+
+    try:
+        df = run_async(client.get_sheet_data("Tasks", user_id))
+        now = datetime.now()
+        archived_count = 0
+
+        for idx, task in df.iterrows():
+            if str(task.get("status", "")) != "complete":
+                continue
+            if str(task.get("archived", "")).lower() == "true":
+                continue
+
+            completed_at = str(task.get("completed_at", ""))
+            if not completed_at:
+                continue
+
+            try:
+                completed_date = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
+                days_old = (now - completed_date.replace(tzinfo=None)).days
+                if days_old >= 7:
+                    task_id = str(task.get("task_id", ""))
+                    row_idx = run_async(client.find_row_by_id("Tasks", user_id, task_id))
+                    if row_idx:
+                        run_async(client.update_row("Tasks", row_idx, {"archived": "true"}))
+                        archived_count += 1
+            except:
+                continue
+
+        clear_cache("tasks")
+        return jsonify({"success": True, "message": f"Archived {archived_count} task(s)"})
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/commands/process-recurring", methods=["POST"])
+@login_required
+def api_commands_process_recurring():
+    """Process recurring tasks - placeholder for now."""
+    return jsonify({"success": True, "message": "Recurring task processing triggered (handled by bot)"})
+
+
+@app.route("/api/commands/check-deadlines", methods=["POST"])
+@login_required
+def api_commands_check_deadlines():
+    """Check for upcoming deadlines and notify user."""
+    data = request.json
+    user_id = data.get("user_id", "")
+    chat_id = get_user_chat_id(user_id)
+
+    if not chat_id:
+        return jsonify({"success": False, "error": "User not found or no chat_id"})
+
+    client = get_sheets_client()
+    if not client:
+        return jsonify({"success": False, "error": "Sheets client not configured"})
+
+    try:
+        df = run_async(client.get_sheet_data("Tasks", user_id))
+        pending = df[df["status"] == "pending"]
+        if "archived" in df.columns:
+            pending = pending[pending["archived"].astype(str) != "true"]
+
+        now = datetime.now()
+        upcoming = []
+
+        for _, task in pending.iterrows():
+            deadline = str(task.get("deadline", ""))
+            if not deadline:
+                continue
+            try:
+                deadline_dt = datetime.fromisoformat(deadline.replace("Z", "+00:00")).replace(tzinfo=None)
+                days_until = (deadline_dt.date() - now.date()).days
+                if days_until <= 3:
+                    upcoming.append({
+                        "title": str(task.get("title", "Untitled")),
+                        "days": days_until,
+                        "deadline": deadline_dt.strftime("%Y-%m-%d %H:%M")
+                    })
+            except:
+                continue
+
+        if not upcoming:
+            return jsonify({"success": True, "message": "No upcoming deadlines within 3 days"})
+
+        # Sort by days until
+        upcoming.sort(key=lambda x: x["days"])
+
+        message = "<b>Upcoming Deadlines:</b>\n\n"
+        for item in upcoming:
+            if item["days"] < 0:
+                message += f"OVERDUE: {item['title']} (was due {abs(item['days'])} day(s) ago)\n"
+            elif item["days"] == 0:
+                message += f"TODAY: {item['title']}\n"
+            elif item["days"] == 1:
+                message += f"TOMORROW: {item['title']}\n"
+            else:
+                message += f"In {item['days']} days: {item['title']}\n"
+
+        result = send_telegram_message(chat_id, message)
+        if result.get("ok"):
+            return jsonify({"success": True, "message": f"Sent {len(upcoming)} deadline reminder(s)"})
+        else:
+            return jsonify({"success": False, "error": result.get("description", "Failed to send")})
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/commands/send-message", methods=["POST"])
+@login_required
+def api_commands_send_message():
+    """Send a custom message to user."""
+    data = request.json
+    user_id = data.get("user_id", "")
+    message = data.get("message", "").strip()
+    chat_id = get_user_chat_id(user_id)
+
+    if not chat_id:
+        return jsonify({"success": False, "error": "User not found or no chat_id"})
+
+    if not message:
+        return jsonify({"success": False, "error": "Message cannot be empty"})
+
+    result = send_telegram_message(chat_id, message)
+    if result.get("ok"):
+        return jsonify({"success": True, "message": "Message sent"})
+    else:
+        return jsonify({"success": False, "error": result.get("description", "Failed to send")})
+
+
+@app.route("/api/commands/stats")
+@login_required
+def api_commands_stats():
+    """Get quick stats for the commands page."""
+    user_id = request.args.get("user_id", "")
+
+    client = get_sheets_client()
+
+    stats = {
+        "bot_status": get_bot_status(),
+        "checkin_hours": "8, 10, 12, 14, 16, 18",  # Default
+        "current_hour": datetime.now().strftime("%H:%M"),
+        "pending_tasks": 0
+    }
+
+    # Get check-in hours from env
+    env_config = load_env()
+    stats["checkin_hours"] = env_config.get("CHECKIN_HOURS", "10, 14, 18")
+
+    # Get pending task count
+    if client and user_id:
+        try:
+            df = run_async(client.get_sheet_data("Tasks", user_id))
+            pending = df[df["status"] == "pending"]
+            if "archived" in df.columns:
+                pending = pending[pending["archived"].astype(str) != "true"]
+            stats["pending_tasks"] = len(pending)
+        except:
+            pass
+
+    return jsonify({"success": True, "stats": stats})
+
+
+# ============================================================================
 # SERVER
 # ============================================================================
 

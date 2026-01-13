@@ -1277,3 +1277,92 @@ input[type="range"]::-moz-range-thumb {
         display: none;
     }
 }
+
+/* ============================================================================
+   COMMANDS TAB
+   ============================================================================ */
+
+.commands-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+}
+
+.commands-grid .card {
+    margin-bottom: 0;
+}
+
+.commands-grid .card-full-width {
+    grid-column: 1 / -1;
+}
+
+.command-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.command-btn {
+    min-width: 140px;
+    padding: 0.75rem 1rem;
+}
+
+.command-btn:disabled {
+    cursor: wait;
+}
+
+/* Stats grid */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+}
+
+.stat-item {
+    text-align: center;
+    padding: 1rem;
+    background: var(--gray-50);
+    border-radius: 8px;
+}
+
+.stat-label {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--gray-500);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.375rem;
+}
+
+.stat-value {
+    display: block;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--gray-900);
+}
+
+/* Custom message textarea */
+#tab-commands .form-group textarea {
+    width: 100%;
+    min-height: 80px;
+    resize: vertical;
+}
+
+/* Responsive commands */
+@media (max-width: 768px) {
+    .commands-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .command-buttons {
+        flex-direction: column;
+    }
+
+    .command-btn {
+        width: 100%;
+    }
+}
