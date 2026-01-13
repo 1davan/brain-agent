@@ -36,6 +36,33 @@ DEFAULT_PASSWORD = "brainagent2024"
 # Sheets client (initialized lazily)
 _sheets_client = None
 
+# Simple cache for API responses to reduce Google Sheets API calls
+_cache = {}
+CACHE_TTL = 30  # seconds
+
+
+def get_cached(key):
+    """Get cached value if not expired."""
+    if key in _cache:
+        value, timestamp = _cache[key]
+        if time.time() - timestamp < CACHE_TTL:
+            return value
+    return None
+
+
+def set_cached(key, value):
+    """Set cache value with timestamp."""
+    _cache[key] = (value, time.time())
+
+
+def clear_cache(prefix=None):
+    """Clear cache entries, optionally by prefix."""
+    global _cache
+    if prefix:
+        _cache = {k: v for k, v in _cache.items() if not k.startswith(prefix)}
+    else:
+        _cache = {}
+
 
 def get_sheets_client():
     """Get or create SheetsClient instance."""
@@ -429,6 +456,11 @@ def test_sheets():
 @login_required
 def api_users():
     """Get list of users from Users sheet."""
+    # Check cache first
+    cached = get_cached("users")
+    if cached:
+        return jsonify({"success": True, "users": cached})
+
     client = get_sheets_client()
     if not client:
         return jsonify({"success": False, "error": "Sheets client not configured"})
@@ -443,6 +475,7 @@ def api_users():
                 "chat_id": str(row.get("chat_id", "")),
                 "last_active": str(row.get("last_active", ""))
             })
+        set_cached("users", users)
         return jsonify({"success": True, "users": users})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
@@ -460,35 +493,42 @@ def api_memories_list():
     category = request.args.get("category", "")
     search = request.args.get("search", "").lower()
 
-    client = get_sheets_client()
-    if not client:
-        return jsonify({"success": False, "error": "Sheets client not configured"})
+    # Check cache first (only for base query without filters)
+    cache_key = f"memories:{user_id}"
+    cached_memories = get_cached(cache_key)
 
-    try:
-        df = run_async(client.get_sheet_data("Memories", user_id if user_id else None))
-        memories = []
-        for _, row in df.iterrows():
-            memory = {
-                "user_id": str(row.get("user_id", "")),
-                "category": str(row.get("category", "")),
-                "key": str(row.get("key", "")),
-                "value": str(row.get("value", "")),
-                "confidence": float(row.get("confidence", 0.5)) if row.get("confidence") else 0.5,
-                "tags": str(row.get("tags", "[]")),
-                "timestamp": str(row.get("timestamp", ""))
-            }
+    if cached_memories is None:
+        client = get_sheets_client()
+        if not client:
+            return jsonify({"success": False, "error": "Sheets client not configured"})
 
-            # Apply filters
-            if category and memory["category"] != category:
-                continue
-            if search and search not in memory["key"].lower() and search not in memory["value"].lower():
-                continue
+        try:
+            df = run_async(client.get_sheet_data("Memories", user_id if user_id else None))
+            cached_memories = []
+            for _, row in df.iterrows():
+                cached_memories.append({
+                    "user_id": str(row.get("user_id", "")),
+                    "category": str(row.get("category", "")),
+                    "key": str(row.get("key", "")),
+                    "value": str(row.get("value", "")),
+                    "confidence": float(row.get("confidence", 0.5)) if row.get("confidence") else 0.5,
+                    "tags": str(row.get("tags", "[]")),
+                    "timestamp": str(row.get("timestamp", ""))
+                })
+            set_cached(cache_key, cached_memories)
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
 
-            memories.append(memory)
+    # Apply filters on cached data
+    memories = []
+    for memory in cached_memories:
+        if category and memory["category"] != category:
+            continue
+        if search and search not in memory["key"].lower() and search not in memory["value"].lower():
+            continue
+        memories.append(memory)
 
-        return jsonify({"success": True, "memories": memories})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+    return jsonify({"success": True, "memories": memories})
 
 
 @app.route("/api/memories", methods=["POST"])
@@ -513,6 +553,7 @@ def api_memories_create():
             "tags": json.dumps(data.get("tags", []))
         }
         run_async(client.append_row("Memories", memory_data))
+        clear_cache("memories")  # Invalidate cache
         return jsonify({"success": True, "message": "Memory created"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
@@ -547,6 +588,7 @@ def api_memories_update(key):
 
         if update_data:
             run_async(client.update_row("Memories", row_idx, update_data))
+            clear_cache("memories")  # Invalidate cache
 
         return jsonify({"success": True, "message": "Memory updated"})
     except Exception as e:
@@ -586,6 +628,7 @@ def api_memories_delete(key):
         if row_idx:
             run_async(client.delete_row("Memories", row_idx))
 
+        clear_cache("memories")  # Invalidate cache
         return jsonify({"success": True, "message": "Memory archived"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
@@ -605,50 +648,57 @@ def api_tasks_list():
     show_archived = request.args.get("archived", "false").lower() == "true"
     search = request.args.get("search", "").lower()
 
-    client = get_sheets_client()
-    if not client:
-        return jsonify({"success": False, "error": "Sheets client not configured"})
+    # Check cache first
+    cache_key = f"tasks:{user_id}"
+    cached_tasks = get_cached(cache_key)
 
-    try:
-        df = run_async(client.get_sheet_data("Tasks", user_id if user_id else None))
-        tasks = []
-        for _, row in df.iterrows():
-            task = {
-                "user_id": str(row.get("user_id", "")),
-                "task_id": str(row.get("task_id", "")),
-                "title": str(row.get("title", "")),
-                "description": str(row.get("description", "")),
-                "priority": str(row.get("priority", "medium")),
-                "status": str(row.get("status", "pending")),
-                "deadline": str(row.get("deadline", "")),
-                "created_at": str(row.get("created_at", "")),
-                "updated_at": str(row.get("updated_at", "")),
-                "notes": str(row.get("notes", "")),
-                "progress_percent": int(row.get("progress_percent", 0)) if row.get("progress_percent") else 0,
-                "is_recurring": str(row.get("is_recurring", "false")).lower() == "true",
-                "recurrence_pattern": str(row.get("recurrence_pattern", "")),
-                "archived": str(row.get("archived", "false")).lower() == "true"
-            }
+    if cached_tasks is None:
+        client = get_sheets_client()
+        if not client:
+            return jsonify({"success": False, "error": "Sheets client not configured"})
 
-            # Apply filters
-            if status and task["status"] != status:
-                continue
-            if priority and task["priority"] != priority:
-                continue
-            if not show_archived and task["archived"]:
-                continue
-            if search and search not in task["title"].lower() and search not in task["description"].lower():
-                continue
+        try:
+            df = run_async(client.get_sheet_data("Tasks", user_id if user_id else None))
+            cached_tasks = []
+            for _, row in df.iterrows():
+                cached_tasks.append({
+                    "user_id": str(row.get("user_id", "")),
+                    "task_id": str(row.get("task_id", "")),
+                    "title": str(row.get("title", "")),
+                    "description": str(row.get("description", "")),
+                    "priority": str(row.get("priority", "medium")),
+                    "status": str(row.get("status", "pending")),
+                    "deadline": str(row.get("deadline", "")),
+                    "created_at": str(row.get("created_at", "")),
+                    "updated_at": str(row.get("updated_at", "")),
+                    "notes": str(row.get("notes", "")),
+                    "progress_percent": int(row.get("progress_percent", 0)) if row.get("progress_percent") else 0,
+                    "is_recurring": str(row.get("is_recurring", "false")).lower() == "true",
+                    "recurrence_pattern": str(row.get("recurrence_pattern", "")),
+                    "archived": str(row.get("archived", "false")).lower() == "true"
+                })
+            set_cached(cache_key, cached_tasks)
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
 
-            tasks.append(task)
+    # Apply filters on cached data
+    tasks = []
+    for task in cached_tasks:
+        if status and task["status"] != status:
+            continue
+        if priority and task["priority"] != priority:
+            continue
+        if not show_archived and task["archived"]:
+            continue
+        if search and search not in task["title"].lower() and search not in task["description"].lower():
+            continue
+        tasks.append(task)
 
-        # Sort by priority and deadline
-        priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-        tasks.sort(key=lambda t: (priority_order.get(t["priority"], 2), t["deadline"] or "9999"))
+    # Sort by priority and deadline
+    priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    tasks.sort(key=lambda t: (priority_order.get(t["priority"], 2), t["deadline"] or "9999"))
 
-        return jsonify({"success": True, "tasks": tasks})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+    return jsonify({"success": True, "tasks": tasks})
 
 
 @app.route("/api/tasks", methods=["POST"])
@@ -688,6 +738,7 @@ def api_tasks_create():
             "archived": "false"
         }
         run_async(client.append_row("Tasks", task_data))
+        clear_cache("tasks")  # Invalidate cache
         return jsonify({"success": True, "message": "Task created", "task_id": task_id})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
@@ -728,6 +779,7 @@ def api_tasks_update(task_id):
             update_data["progress_percent"] = "100"
 
         run_async(client.update_row("Tasks", row_idx, update_data))
+        clear_cache("tasks")  # Invalidate cache
         return jsonify({"success": True, "message": "Task updated"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
@@ -756,6 +808,7 @@ def api_tasks_complete(task_id):
             "updated_at": now
         }
         run_async(client.update_row("Tasks", row_idx, update_data))
+        clear_cache("tasks")  # Invalidate cache
         return jsonify({"success": True, "message": "Task completed"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
@@ -777,6 +830,7 @@ def api_tasks_delete(task_id):
 
         now = datetime.now().isoformat()
         run_async(client.update_row("Tasks", row_idx, {"archived": "true", "updated_at": now}))
+        clear_cache("tasks")  # Invalidate cache
         return jsonify({"success": True, "message": "Task archived"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
@@ -795,42 +849,49 @@ def api_conversations_list():
     search = request.args.get("search", "").lower()
     limit = int(request.args.get("limit", 100))
 
-    client = get_sheets_client()
-    if not client:
-        return jsonify({"success": False, "error": "Sheets client not configured"})
+    # Check cache first
+    cache_key = f"conversations:{user_id}"
+    cached_convos = get_cached(cache_key)
 
-    try:
-        df = run_async(client.get_sheet_data("Conversations", user_id if user_id else None))
-        conversations = []
-        for _, row in df.iterrows():
-            conv = {
-                "user_id": str(row.get("user_id", "")),
-                "session_id": str(row.get("session_id", "")),
-                "message_type": str(row.get("message_type", "")),
-                "content": str(row.get("content", "")),
-                "timestamp": str(row.get("timestamp", "")),
-                "intent": str(row.get("intent", "")),
-                "entities": str(row.get("entities", "{}"))
-            }
+    if cached_convos is None:
+        client = get_sheets_client()
+        if not client:
+            return jsonify({"success": False, "error": "Sheets client not configured"})
 
-            # Apply filters
-            if session_id and conv["session_id"] != session_id:
-                continue
-            if search and search not in conv["content"].lower():
-                continue
+        try:
+            df = run_async(client.get_sheet_data("Conversations", user_id if user_id else None))
+            cached_convos = []
+            for _, row in df.iterrows():
+                cached_convos.append({
+                    "user_id": str(row.get("user_id", "")),
+                    "session_id": str(row.get("session_id", "")),
+                    "message_type": str(row.get("message_type", "")),
+                    "content": str(row.get("content", "")),
+                    "timestamp": str(row.get("timestamp", "")),
+                    "intent": str(row.get("intent", "")),
+                    "entities": str(row.get("entities", "{}"))
+                })
+            set_cached(cache_key, cached_convos)
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
 
-            conversations.append(conv)
+    # Apply filters on cached data
+    conversations = []
+    for conv in cached_convos:
+        if session_id and conv["session_id"] != session_id:
+            continue
+        if search and search not in conv["content"].lower():
+            continue
+        conversations.append(conv)
 
-        # Sort by timestamp descending and limit
-        conversations.sort(key=lambda c: c["timestamp"], reverse=True)
-        conversations = conversations[:limit]
+    # Sort by timestamp descending and limit
+    conversations.sort(key=lambda c: c["timestamp"], reverse=True)
+    conversations = conversations[:limit]
 
-        # Get unique sessions for filter dropdown
-        sessions = list(set(c["session_id"] for c in conversations if c["session_id"]))
+    # Get unique sessions for filter dropdown
+    sessions = list(set(c["session_id"] for c in conversations if c["session_id"]))
 
-        return jsonify({"success": True, "conversations": conversations, "sessions": sessions})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+    return jsonify({"success": True, "conversations": conversations, "sessions": sessions})
 
 
 # ============================================================================
