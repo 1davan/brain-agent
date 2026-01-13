@@ -58,7 +58,8 @@ function switchTab(tabId) {
     });
 
     // Load data for the tab
-    if (tabId === 'memories') loadMemories();
+    if (tabId === 'settings') loadSettings();
+    else if (tabId === 'memories') loadMemories();
     else if (tabId === 'tasks') loadTasks();
     else if (tabId === 'conversations') loadConversations();
     else if (tabId === 'commands') loadCommandStats();
@@ -1243,5 +1244,245 @@ async function saveCheckinHours() {
         }
     } catch (e) {
         showToast('Failed to save check-in hours: ' + e, 'error');
+    }
+}
+
+// ============================================================================
+// SETTINGS TAB - Per-User Config Management
+// ============================================================================
+
+// Mapping of setting variables to their category sections
+const SETTINGS_CATEGORIES = {
+    proactive: [
+        'daily_summary_enabled', 'daily_summary_hour', 'default_checkin_hours',
+        'checkins_enabled', 'deadline_reminders_enabled', 'reminder_minutes_before',
+        'proactive_check_interval'
+    ],
+    tasks: [
+        'task_archive_days', 'default_task_priority', 'auto_create_calendar_for_tasks'
+    ],
+    ai: [
+        'max_memories_context', 'max_tasks_context', 'max_conversations_context',
+        'discussion_mode_memory_limit', 'discussion_mode_task_limit', 'use_pipeline', 'ai_model'
+    ],
+    session: [
+        'session_timeout_minutes', 'typing_indicator_enabled', 'include_calendar_in_responses'
+    ],
+    voice: [
+        'voice_transcription_enabled', 'show_transcription_in_response'
+    ],
+    email: [
+        'email_require_confirmation', 'email_default_sign_off'
+    ],
+    calendar: [
+        'calendar_lookahead_days', 'calendar_delete_requires_confirmation'
+    ],
+    system: [
+        'timezone', 'bot_name', 'debug_mode'
+    ]
+};
+
+let settingsData = [];
+let settingsUserId = '';
+
+async function loadSettings() {
+    const userFilter = document.getElementById('settingsUserFilter');
+    const search = document.getElementById('settingsSearch').value.toLowerCase();
+    const loading = document.getElementById('settingsLoading');
+
+    settingsUserId = userFilter.value;
+
+    loading.style.display = 'block';
+
+    // Populate user dropdown if not already done
+    if (userFilter.options.length <= 1) {
+        try {
+            const usersResponse = await fetch('/api/users');
+            const usersData = await usersResponse.json();
+            if (usersData.success && usersData.users.length > 0) {
+                usersData.users.forEach(user => {
+                    const option = document.createElement('option');
+                    option.value = user.user_id;
+                    option.textContent = user.username ?
+                        `${user.username} (${user.user_id})` :
+                        `User ${user.user_id}`;
+                    userFilter.appendChild(option);
+                });
+            }
+        } catch (e) {
+            console.error('Failed to load users for settings:', e);
+        }
+    }
+
+    try {
+        // Fetch config with raw details
+        let url = '/api/config?raw=true';
+        if (settingsUserId) {
+            url += `&user_id=${encodeURIComponent(settingsUserId)}`;
+        }
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        loading.style.display = 'none';
+
+        if (!data.success) {
+            showToast('Error loading settings: ' + data.error, 'error');
+            return;
+        }
+
+        settingsData = data.config;
+
+        // Render settings by category
+        renderSettingsCategory('settingsProactive', SETTINGS_CATEGORIES.proactive, search);
+        renderSettingsCategory('settingsTasks', SETTINGS_CATEGORIES.tasks, search);
+        renderSettingsCategory('settingsAI', SETTINGS_CATEGORIES.ai, search);
+        renderSettingsCategory('settingsSession', SETTINGS_CATEGORIES.session, search);
+        renderSettingsCategory('settingsVoice', SETTINGS_CATEGORIES.voice, search);
+        renderSettingsCategory('settingsEmail', SETTINGS_CATEGORIES.email, search);
+        renderSettingsCategory('settingsCalendar', SETTINGS_CATEGORIES.calendar, search);
+        renderSettingsCategory('settingsSystem', SETTINGS_CATEGORIES.system, search);
+
+    } catch (e) {
+        loading.style.display = 'none';
+        showToast('Error loading settings: ' + e, 'error');
+    }
+}
+
+function renderSettingsCategory(containerId, variables, search) {
+    const container = document.getElementById(containerId);
+    container.innerHTML = '';
+
+    variables.forEach(varName => {
+        const setting = settingsData.find(s => s.variable === varName);
+        if (!setting) return;
+
+        // Apply search filter
+        if (search && !varName.toLowerCase().includes(search) &&
+            !setting.description.toLowerCase().includes(search)) {
+            return;
+        }
+
+        const isUserOverride = setting.user_id && setting.user_id !== '';
+        const row = createSettingRow(setting, isUserOverride);
+        container.appendChild(row);
+    });
+
+    // Hide section if empty after filtering
+    const section = container.closest('.settings-section');
+    if (container.children.length === 0) {
+        section.style.display = 'none';
+    } else {
+        section.style.display = '';
+    }
+}
+
+function createSettingRow(setting, isUserOverride) {
+    const div = document.createElement('div');
+    div.className = 'setting-item' + (isUserOverride ? ' user-override' : '');
+    div.dataset.variable = setting.variable;
+
+    const labelText = setting.variable.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+    let inputHtml = '';
+    if (setting.type === 'bool') {
+        const isChecked = setting.value.toLowerCase() === 'true';
+        inputHtml = `
+            <label class="toggle-switch">
+                <input type="checkbox" data-var="${escapeHtml(setting.variable)}"
+                       ${isChecked ? 'checked' : ''} onchange="updateSetting('${escapeHtml(setting.variable)}', this.checked ? 'true' : 'false')">
+                <span class="toggle-slider"></span>
+            </label>
+        `;
+    } else if (setting.type === 'int') {
+        inputHtml = `
+            <input type="number" class="setting-input" data-var="${escapeHtml(setting.variable)}"
+                   value="${escapeHtml(setting.value)}"
+                   onchange="updateSetting('${escapeHtml(setting.variable)}', this.value)">
+        `;
+    } else {
+        inputHtml = `
+            <input type="text" class="setting-input" data-var="${escapeHtml(setting.variable)}"
+                   value="${escapeHtml(setting.value)}"
+                   onchange="updateSetting('${escapeHtml(setting.variable)}', this.value)">
+        `;
+    }
+
+    let revertBtn = '';
+    if (isUserOverride && settingsUserId) {
+        revertBtn = `<button class="btn-icon btn-revert" onclick="revertSetting('${escapeHtml(setting.variable)}')" title="Revert to global default">&#x21B6;</button>`;
+    }
+
+    div.innerHTML = `
+        <div class="setting-header">
+            <span class="setting-name">${labelText}</span>
+            ${isUserOverride ? '<span class="override-badge">User Override</span>' : ''}
+            ${revertBtn}
+        </div>
+        <div class="setting-control">
+            ${inputHtml}
+        </div>
+        <div class="setting-description">${escapeHtml(setting.description)}</div>
+    `;
+
+    return div;
+}
+
+async function updateSetting(variable, value) {
+    try {
+        const body = {
+            value: value
+        };
+
+        // If a user is selected, this becomes a user-specific override
+        if (settingsUserId) {
+            body.user_id = settingsUserId;
+        }
+
+        const response = await fetch(`/api/config/${encodeURIComponent(variable)}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showToast(`${variable.replace(/_/g, ' ')} updated`, 'success');
+            // Reload to reflect any override badge changes
+            loadSettings();
+        } else {
+            showToast('Error: ' + (data.error || 'Unknown error'), 'error');
+        }
+    } catch (e) {
+        showToast('Failed to update setting: ' + e, 'error');
+    }
+}
+
+async function revertSetting(variable) {
+    if (!settingsUserId) {
+        showToast('No user selected to revert', 'error');
+        return;
+    }
+
+    if (!confirm(`Revert "${variable.replace(/_/g, ' ')}" to global default for this user?`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/config/${encodeURIComponent(variable)}?user_id=${encodeURIComponent(settingsUserId)}`, {
+            method: 'DELETE'
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showToast(`Reverted to global default`, 'success');
+            loadSettings();
+        } else {
+            showToast('Error: ' + (data.error || 'Unknown error'), 'error');
+        }
+    } catch (e) {
+        showToast('Failed to revert setting: ' + e, 'error');
     }
 }

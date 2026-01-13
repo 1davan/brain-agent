@@ -27,6 +27,7 @@
         <!-- Tab Navigation -->
         <nav class="tab-nav">
             <button class="tab-btn active" data-tab="credentials">Credentials</button>
+            <button class="tab-btn" data-tab="settings">Settings</button>
             <button class="tab-btn" data-tab="memories">Memories</button>
             <button class="tab-btn" data-tab="tasks">Tasks</button>
             <button class="tab-btn" data-tab="conversations">Conversations</button>
@@ -187,6 +188,77 @@
                         Open Google Sheet
                     </a>
                 </p>
+            </section>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- SETTINGS TAB -->
+        <!-- ============================================================ -->
+        <div id="tab-settings" class="tab-content">
+            <section class="card">
+                <div class="tab-header">
+                    <h2>Bot Settings</h2>
+                    <div class="tab-actions">
+                        <select id="settingsUserFilter" onchange="loadSettings()">
+                            <option value="">Global (Default)</option>
+                        </select>
+                        <input type="text" id="settingsSearch" placeholder="Search settings..." onkeyup="debounceSearch(loadSettings)">
+                    </div>
+                </div>
+                <p class="section-desc">
+                    Configure bot behavior. Select a user to view/edit their specific settings,
+                    or "Global" to edit defaults. User-specific settings override global defaults.
+                </p>
+                <div id="settingsLoading" class="loading">Loading settings...</div>
+                <div class="settings-container">
+                    <!-- Proactive Features -->
+                    <div class="settings-section">
+                        <h3>Proactive Features</h3>
+                        <div id="settingsProactive" class="settings-grid"></div>
+                    </div>
+
+                    <!-- Task Settings -->
+                    <div class="settings-section">
+                        <h3>Task Settings</h3>
+                        <div id="settingsTasks" class="settings-grid"></div>
+                    </div>
+
+                    <!-- AI Context Limits -->
+                    <div class="settings-section">
+                        <h3>AI Context Limits</h3>
+                        <div id="settingsAI" class="settings-grid"></div>
+                    </div>
+
+                    <!-- Session & Interaction -->
+                    <div class="settings-section">
+                        <h3>Session & Interaction</h3>
+                        <div id="settingsSession" class="settings-grid"></div>
+                    </div>
+
+                    <!-- Voice & Media -->
+                    <div class="settings-section">
+                        <h3>Voice & Media</h3>
+                        <div id="settingsVoice" class="settings-grid"></div>
+                    </div>
+
+                    <!-- Email Settings -->
+                    <div class="settings-section">
+                        <h3>Email Settings</h3>
+                        <div id="settingsEmail" class="settings-grid"></div>
+                    </div>
+
+                    <!-- Calendar Settings -->
+                    <div class="settings-section">
+                        <h3>Calendar Settings</h3>
+                        <div id="settingsCalendar" class="settings-grid"></div>
+                    </div>
+
+                    <!-- System -->
+                    <div class="settings-section">
+                        <h3>System</h3>
+                        <div id="settingsSystem" class="settings-grid"></div>
+                    </div>
+                </div>
             </section>
         </div>
 

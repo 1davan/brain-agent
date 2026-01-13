@@ -64,10 +64,10 @@ def clear_cache(prefix=None):
         _cache = {}
 
 
-def get_sheets_client():
+def get_sheets_client(force_reinit: bool = False):
     """Get or create SheetsClient instance."""
     global _sheets_client
-    if _sheets_client is None:
+    if _sheets_client is None or force_reinit:
         env_config = load_env()
         creds_path = env_config.get("GOOGLE_SHEETS_CREDENTIALS", "credentials.json")
         spreadsheet_id = env_config.get("SPREADSHEET_ID", "")
@@ -89,6 +89,13 @@ def get_sheets_client():
             print(f"Failed to initialize SheetsClient: {e}")
             return None
     return _sheets_client
+
+
+def reinit_sheets_client():
+    """Force reinitialize the sheets client (runs migrations)."""
+    global _sheets_client
+    _sheets_client = None
+    return get_sheets_client(force_reinit=True)
 
 
 def run_async(coro):
@@ -901,14 +908,28 @@ def api_conversations_list():
 @app.route("/api/config")
 @login_required
 def api_config_list():
-    """Get all config variables."""
+    """Get all config variables with optional user filter.
+
+    Query params:
+    - user_id: If provided, returns effective config for that user (with overrides applied)
+    - raw: If "true", returns all entries with user_id info (for editing UI)
+    """
+    user_id = request.args.get("user_id", "")
+    raw = request.args.get("raw", "false").lower() == "true"
+
     client = get_sheets_client()
     if not client:
         return jsonify({"success": False, "error": "Sheets client not configured"})
 
     try:
-        config = run_async(client.get_all_config())
-        return jsonify({"success": True, "config": config})
+        if raw:
+            # Return detailed config with user_id info for the settings UI
+            config_list = run_async(client.get_all_config_with_details(user_id if user_id else None))
+            return jsonify({"success": True, "config": config_list})
+        else:
+            # Return simple key-value config (effective values for user)
+            config = run_async(client.get_all_config(user_id if user_id else None))
+            return jsonify({"success": True, "config": config})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
@@ -916,27 +937,70 @@ def api_config_list():
 @app.route("/api/config/<variable>", methods=["PUT"])
 @login_required
 def api_config_update(variable):
-    """Update a config variable."""
+    """Update a config variable.
+
+    JSON body:
+    - value: The new value
+    - user_id: If provided, creates/updates user-specific override; otherwise updates global
+    """
     data = request.json
     value = data.get("value", "")
+    user_id = data.get("user_id", "")
+
     client = get_sheets_client()
     if not client:
         return jsonify({"success": False, "error": "Sheets client not configured"})
 
     try:
-        # Find the row in Config sheet
-        sheet = client.spreadsheet.worksheet("Config")
-        all_data = sheet.get_all_records()
+        success = run_async(client.set_config(variable, value, user_id if user_id else None))
+        if success:
+            clear_cache("config")
+            return jsonify({"success": True, "message": "Config updated"})
+        else:
+            return jsonify({"success": False, "error": "Failed to update config"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
 
-        for idx, row in enumerate(all_data):
-            if str(row.get("variable", "")) == variable:
-                # Update value column (column B, index 2)
-                sheet.update_cell(idx + 2, 2, str(value))
-                return jsonify({"success": True, "message": "Config updated"})
 
-        # If not found, create new
-        sheet.append_row([variable, str(value), "", "string"])
-        return jsonify({"success": True, "message": "Config created"})
+@app.route("/api/config/<variable>", methods=["DELETE"])
+@login_required
+def api_config_delete(variable):
+    """Delete a user-specific config override (reverts to global default).
+
+    Query params:
+    - user_id: Required - the user whose override to delete
+    """
+    user_id = request.args.get("user_id", "")
+
+    if not user_id:
+        return jsonify({"success": False, "error": "user_id required to delete override"})
+
+    client = get_sheets_client()
+    if not client:
+        return jsonify({"success": False, "error": "Sheets client not configured"})
+
+    try:
+        success = run_async(client.delete_user_config(variable, user_id))
+        if success:
+            clear_cache("config")
+            return jsonify({"success": True, "message": "Config override deleted"})
+        else:
+            return jsonify({"success": False, "error": "Override not found"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/config/migrate", methods=["POST"])
+@login_required
+def api_config_migrate():
+    """Force reinitialize sheets client to run migrations."""
+    try:
+        client = reinit_sheets_client()
+        if client:
+            clear_cache("config")
+            return jsonify({"success": True, "message": "Sheets client reinitialized, migrations applied"})
+        else:
+            return jsonify({"success": False, "error": "Failed to reinitialize sheets client"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
