@@ -66,6 +66,24 @@ class SheetsClient:
 
         # Run migrations for schema changes
         self._migrate_config_sheet()
+        self._migrate_tasks_sheet()
+
+    def _migrate_tasks_sheet(self):
+        """Migrate Tasks sheet to add skipped_until column if missing."""
+        try:
+            sheet = self.spreadsheet.worksheet("Tasks")
+            headers = sheet.row_values(1)
+
+            # Check if skipped_until column exists
+            if headers and 'skipped_until' not in headers:
+                print("Migrating Tasks sheet to add skipped_until column...")
+                # Add the new column header at the end
+                new_col_index = len(headers) + 1
+                sheet.update_cell(1, new_col_index, 'skipped_until')
+                print(f"Tasks sheet migrated: added skipped_until column at position {new_col_index}")
+
+        except Exception as e:
+            print(f"Error migrating Tasks sheet: {e}")
 
     def _migrate_config_sheet(self):
         """Migrate Config sheet to add user_id column if missing (for per-user settings)."""
@@ -188,7 +206,7 @@ class SheetsClient:
             "Tasks": ["user_id", "task_id", "title", "description", "priority", "status", "deadline",
                       "created_at", "updated_at", "dependencies", "notes",
                       "is_recurring", "recurrence_pattern", "recurrence_end_date", "parent_task_id",
-                      "progress_percent", "last_discussed", "completed_at", "archived"],
+                      "progress_percent", "last_discussed", "completed_at", "archived", "skipped_until"],
             "Archive": ["user_id", "original_sheet", "content", "archived_at", "reason"],
             "Conversations": ["user_id", "session_id", "message_type", "content", "timestamp", "intent", "entities"],
             "Users": ["user_id", "chat_id", "username", "first_seen", "last_active", "preferences"],

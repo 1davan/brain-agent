@@ -243,8 +243,14 @@ class TaskAgent:
             return f"Error updating task progress: {str(e)}"
 
     async def get_tasks_for_checkin(self, user_id: str, limit: int = 3) -> List[Dict]:
-        """Get tasks suitable for proactive check-in with intelligent weighting"""
+        """Get tasks suitable for proactive check-in with intelligent weighting.
+
+        Filters out tasks that have been recently skipped (skipped_until in the future).
+        Uses weighted random selection to ensure variety in check-ins.
+        """
         try:
+            import random
+
             tasks_df = await self.sheets.get_sheet_data("Tasks", user_id)
             if tasks_df.empty:
                 return []
@@ -263,6 +269,19 @@ class TaskAgent:
             # Score each task for check-in priority
             scored_tasks = []
             for task in tasks:
+                # Skip tasks that are temporarily suppressed (skipped_until in the future)
+                skipped_until_str = task.get('skipped_until', '')
+                if skipped_until_str:
+                    try:
+                        skipped_until = datetime.fromisoformat(skipped_until_str.replace('Z', '+00:00'))
+                        if skipped_until.tzinfo is None:
+                            skipped_until = BRISBANE_TZ.localize(skipped_until)
+                        if skipped_until > now:
+                            # Task is still in skip period, exclude it
+                            continue
+                    except:
+                        pass  # Invalid date, ignore the skip
+
                 score = 0
 
                 # Priority weighting: high=30, medium=20, low=10
@@ -303,27 +322,36 @@ class TaskAgent:
                     score += 10  # Making progress
 
                 # Time since last discussed: longer = higher priority
+                # Also penalize tasks discussed recently (within last few hours)
                 last_discussed = task.get('last_discussed')
                 if last_discussed:
                     try:
                         last_dt = datetime.fromisoformat(last_discussed.replace('Z', '+00:00'))
                         if last_dt.tzinfo is None:
                             last_dt = BRISBANE_TZ.localize(last_dt)
-                        days_since = (now - last_dt).days
-                        if days_since >= 3:
-                            score += 25
+                        hours_since = (now - last_dt).total_seconds() / 3600
+                        days_since = hours_since / 24
+
+                        if hours_since < 2:
+                            score -= 30  # Discussed very recently, strong penalty
+                        elif hours_since < 6:
+                            score -= 15  # Discussed within 6 hours, moderate penalty
+                        elif days_since >= 3:
+                            score += 25  # Not discussed in 3+ days
                         elif days_since >= 1:
-                            score += 15
+                            score += 15  # Not discussed in 1+ day
                     except:
-                        score += 20  # Never discussed, give it a boost
+                        score += 20  # Parse error, assume never discussed
                 else:
                     score += 20  # Never discussed
 
-                # Add some randomness to prevent always picking the same tasks
-                import random
-                score += random.randint(0, 10)
+                # Increased randomness (0-25) for better task rotation
+                score += random.randint(0, 25)
 
                 scored_tasks.append((score, task))
+
+            if not scored_tasks:
+                return []
 
             # Sort by score descending and pick top tasks
             scored_tasks.sort(key=lambda x: x[0], reverse=True)
@@ -332,6 +360,32 @@ class TaskAgent:
         except Exception as e:
             print(f"Error getting tasks for check-in: {e}")
             return []
+
+    async def skip_task_checkin(self, user_id: str, task_id: str, skip_hours: int = 4) -> str:
+        """Mark a task as skipped for check-in - suppresses it for skip_hours.
+
+        Updates last_discussed to now and sets skipped_until to now + skip_hours.
+        This prevents the same task from being selected repeatedly.
+        """
+        try:
+            row_index = await self.sheets.find_row_by_id("Tasks", user_id, task_id)
+            if not row_index:
+                return f"Task not found: {task_id}"
+
+            now = datetime.now(BRISBANE_TZ)
+            skipped_until = now + timedelta(hours=skip_hours)
+
+            await self.sheets.update_row("Tasks", row_index, {
+                "last_discussed": now.isoformat(),
+                "skipped_until": skipped_until.isoformat(),
+                "updated_at": now.isoformat()
+            })
+
+            return f"Task skipped until {skipped_until.strftime('%H:%M')}"
+
+        except Exception as e:
+            print(f"Error skipping task check-in: {e}")
+            return f"Error: {str(e)}"
 
     async def archive_old_completed_tasks(self, user_id: str, days_threshold: int = 7) -> int:
         """Archive tasks completed more than X days ago"""

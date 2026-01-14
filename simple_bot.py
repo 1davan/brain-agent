@@ -780,7 +780,9 @@ class SimpleTelegramBot:
                 }
 
             elif action == 'skip':
-                self.edit_message(chat_id, message_id, f"No problem! I'll check in on '{task_title}' later.")
+                # Mark task as skipped - suppresses it for 4 hours
+                loop.run_until_complete(self.task_agent.skip_task_checkin(user_id, task_id, skip_hours=4))
+                self.edit_message(chat_id, message_id, f"No problem! I'll check in on '{task_title}' later today.")
                 # Clear session
                 if user_id in self.task_discussion_sessions:
                     del self.task_discussion_sessions[user_id]
