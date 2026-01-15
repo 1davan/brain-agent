@@ -263,6 +263,22 @@ ssh -i ~/.ssh/sadhuastro_key root@170.64.142.252 \
 
 That's it. Nothing else. No rebuilding, no reinstalling, no Docker.
 
+### Deploy and Verify (Recommended)
+
+Deploy with immediate verification:
+```bash
+ssh -i ~/.ssh/sadhuastro_key root@170.64.142.252 \
+  "cd /root/brain_agent && git pull && systemctl restart brain-agent && sleep 5 && cat /tmp/brain_agent_health.json | jq -r '.status'"
+```
+
+Expected output: `healthy`
+
+If unhealthy, check startup logs:
+```bash
+ssh -i ~/.ssh/sadhuastro_key root@170.64.142.252 \
+  "journalctl -u brain-agent -n 30 --no-pager"
+```
+
 ---
 
 ### Current Server Configuration
@@ -358,12 +374,55 @@ systemctl start brain-agent
 
 ---
 
+### Operations Quick Reference
+
+**Single-command health check:**
+```bash
+ssh -i ~/.ssh/sadhuastro_key root@170.64.142.252 \
+  "cat /tmp/brain_agent_health.json | jq ."
+```
+
+**Check all service connectivity:**
+```bash
+ssh -i ~/.ssh/sadhuastro_key root@170.64.142.252 \
+  "cat /tmp/brain_agent_health.json | jq '.service_health'"
+```
+
+**View recent errors:**
+```bash
+ssh -i ~/.ssh/sadhuastro_key root@170.64.142.252 \
+  "cat /tmp/brain_agent_health.json | jq '.recent_errors'"
+```
+
+**Check pipeline performance:**
+```bash
+ssh -i ~/.ssh/sadhuastro_key root@170.64.142.252 \
+  "cat /tmp/brain_agent_health.json | jq '.pipeline_stats'"
+```
+
+**Live log streaming:**
+```bash
+ssh -i ~/.ssh/sadhuastro_key root@170.64.142.252 \
+  "journalctl -u brain-agent -f"
+```
+
+---
+
 ### Troubleshooting
 
 **Bot not responding after deploy:**
 ```bash
-journalctl -u brain-agent -n 50  # Check for errors
-systemctl restart brain-agent    # Try restart
+# Step 1: Check health file
+ssh -i ~/.ssh/sadhuastro_key root@170.64.142.252 \
+  "cat /tmp/brain_agent_health.json | jq '.status, .recent_errors'"
+
+# Step 2: If health file missing or stale, check systemd
+ssh -i ~/.ssh/sadhuastro_key root@170.64.142.252 \
+  "systemctl status brain-agent"
+
+# Step 3: Check startup logs for validation failures
+ssh -i ~/.ssh/sadhuastro_key root@170.64.142.252 \
+  "journalctl -u brain-agent -n 50 | grep -i 'startup\|error\|failed'"
 ```
 
 **OOM killed (out of memory):**
@@ -382,6 +441,20 @@ swapon --show                    # Verify swap active
 echo "ssh-ed25519 AAAA... user@host" >> /root/.ssh/authorized_keys
 ```
 
+**Groq API timeouts:**
+```bash
+# Check if it's a pattern or one-off
+ssh -i ~/.ssh/sadhuastro_key root@170.64.142.252 \
+  "cat /tmp/brain_agent_health.json | jq '.recent_errors[] | select(.type | contains(\"groq\"))'"
+```
+
+**Google Sheets rate limiting:**
+```bash
+# Check error frequency
+ssh -i ~/.ssh/sadhuastro_key root@170.64.142.252 \
+  "cat /tmp/brain_agent_health.json | jq '.recent_errors[] | select(.type | contains(\"sheets\"))'"
+```
+
 ---
 
 ### Resource Requirements
@@ -393,12 +466,67 @@ echo "ssh-ed25519 AAAA... user@host" >> /root/.ssh/authorized_keys
 | CPU | 1 vCPU | Sufficient |
 | Cost | $6/month | s-1vcpu-1gb droplet |
 
+---
+
+### Health Monitoring System
+
+The bot maintains a health status file at `/tmp/brain_agent_health.json` that provides:
+
+- **Current status**: `healthy`, `degraded`, or `unhealthy`
+- **Service connectivity**: Status of Telegram, Google Sheets, Groq, Calendar, Email
+- **Pipeline performance**: Average latency for each processing stage
+- **Error aggregation**: Recent errors grouped by type with occurrence counts
+- **Proactive loop status**: Last run time and next scheduled check
+
+This file updates every 60 seconds and is the fastest way to diagnose issues.
+
+**Status interpretation:**
+
+| Status | Meaning | Action |
+|--------|---------|--------|
+| `healthy` | All systems operational | None required |
+| `degraded` | Some services slow or erroring | Check `recent_errors` and `service_health` |
+| `unhealthy` | Critical service failure | Check logs, may need restart |
+
+**Health file missing or stale (>2 min old):**
+- Bot process likely crashed
+- Check `systemctl status brain-agent`
+- Check `journalctl -u brain-agent -n 50` for crash reason
+
 ## Troubleshooting
+
+### Startup Validation
+
+On startup, the bot validates all external dependencies before accepting messages. Check startup logs for validation status:
+
+```bash
+journalctl -u brain-agent -n 30 | grep "STARTUP"
+```
+
+**Successful startup shows:**
+```
+[STARTUP] Brain Agent starting...
+[STARTUP] Checking Telegram API... OK
+[STARTUP] Checking Google Sheets... OK
+[STARTUP] Checking Groq API... OK
+[STARTUP] Checking Google Calendar... OK
+[STARTUP] Checking Gmail... OK
+[STARTUP] All systems operational. Ready to receive messages.
+```
+
+**Failed startup identifies the problem:**
+```
+[STARTUP] Checking Google Sheets... FAILED (Permission denied)
+[STARTUP] CRITICAL: Cannot start - fix configuration and restart
+```
+
+### Common Issues
 
 **"Google Sheets API error"**
 - Ensure credentials.json is in the correct location
 - Verify the service account has Editor access to the spreadsheet
 - Check that Google Sheets API is enabled
+- Check startup logs: `journalctl -u brain-agent | grep "Google Sheets"`
 
 **"Calendar not configured"**
 - Enable Google Calendar API in Cloud Console
@@ -406,9 +534,10 @@ echo "ssh-ed25519 AAAA... user@host" >> /root/.ssh/authorized_keys
 - Check GOOGLE_CALENDAR_ID in .env
 
 **Bot not responding**
-- Check Telegram token is correct
-- Verify the bot is running (check console output)
-- Ensure network connectivity
+- First: `cat /tmp/brain_agent_health.json | jq '.status'`
+- If `healthy`: Check Telegram token, network connectivity
+- If `degraded`: Check `.service_health` for failing service
+- If file missing: `systemctl status brain-agent`
 
 **Docker build fails with "no space left"**
 - Run `docker system prune -af` to clear old images

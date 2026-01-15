@@ -15,6 +15,9 @@ A comprehensive guide to the AI-powered Telegram chatbot assistant architecture.
 7. [Proactive Features](#proactive-features)
 8. [Integration Services](#integration-services)
 9. [Data Storage](#data-storage)
+10. [Operational Observability](#operational-observability)
+11. [Health Monitoring](#health-monitoring)
+12. [Logging Architecture](#logging-architecture)
 
 ---
 
@@ -766,3 +769,315 @@ Full conversation history passed to Stage 3 allows resolving pronouns like "it",
 ### Graceful Degradation
 
 Individual service failures don't crash the bot. If calendar fetch fails, message still processes with available context.
+
+---
+
+## Operational Observability
+
+Brain Agent is designed to be operated by AI agents (like Claude Code) that SSH into the production server to diagnose issues, deploy updates, and monitor health. The observability layer minimizes the number of commands needed to answer "is it working?" and "what went wrong?"
+
+### Design Philosophy
+
+Traditional logging assumes a human operator reading logs in real-time. This system assumes an AI agent that:
+- Connects periodically to check status
+- Needs structured, queryable data
+- Benefits from consolidated diagnostics over scattered log files
+- Can parse JSON faster than human-readable prose
+
+### Health Status File
+
+The bot writes a health status file every 60 seconds to `/tmp/brain_agent_health.json`:
+
+```json
+{
+  "timestamp": "2026-01-16T10:30:00+10:00",
+  "uptime_seconds": 86400,
+  "status": "healthy",
+  "last_message_processed": "2026-01-16T10:29:45+10:00",
+  "messages_last_hour": 42,
+  "active_users_today": 3,
+  "pipeline_stats": {
+    "avg_latency_ms": 1200,
+    "stage1_avg_ms": 180,
+    "stage3_avg_ms": 650,
+    "stage4_avg_ms": 320
+  },
+  "service_health": {
+    "telegram_polling": "ok",
+    "google_sheets": "ok",
+    "groq_api": "ok",
+    "calendar_service": "ok",
+    "email_service": "ok"
+  },
+  "recent_errors": [],
+  "proactive_loop": {
+    "last_run": "2026-01-16T10:25:00+10:00",
+    "next_scheduled": "2026-01-16T10:30:00+10:00",
+    "check_ins_sent_today": 6,
+    "summaries_sent_today": 2
+  }
+}
+```
+
+**Operator usage:**
+```bash
+# Quick health check - one command
+cat /tmp/brain_agent_health.json | jq .
+
+# Check if healthy
+cat /tmp/brain_agent_health.json | jq -r '.status'
+
+# See recent errors
+cat /tmp/brain_agent_health.json | jq '.recent_errors'
+
+# Check service connectivity
+cat /tmp/brain_agent_health.json | jq '.service_health'
+```
+
+### Startup Validation
+
+On startup, the bot validates all external dependencies and logs a clear status:
+
+```
+[STARTUP] Brain Agent v1.0 starting...
+[STARTUP] Checking Telegram API... OK (bot: @YourBotName)
+[STARTUP] Checking Google Sheets... OK (spreadsheet: Brain Agent Data)
+[STARTUP] Checking Groq API... OK (model: llama-3.3-70b-versatile)
+[STARTUP] Checking Google Calendar... OK (calendar: primary)
+[STARTUP] Checking Gmail... OK (account: user@gmail.com)
+[STARTUP] Loading embedding model... OK (384 dimensions)
+[STARTUP] All systems operational. Ready to receive messages.
+```
+
+If any dependency fails:
+
+```
+[STARTUP] Brain Agent v1.0 starting...
+[STARTUP] Checking Telegram API... OK
+[STARTUP] Checking Google Sheets... FAILED (Permission denied)
+[STARTUP] CRITICAL: Cannot start - Google Sheets authentication failed
+[STARTUP] Check GOOGLE_SHEETS_CREDENTIALS path and service account permissions
+```
+
+This eliminates guesswork about why the bot isn't responding.
+
+---
+
+## Health Monitoring
+
+### Metrics Collection
+
+The bot tracks operational metrics internally:
+
+| Metric | Description | Retention |
+|--------|-------------|-----------|
+| `messages_processed` | Total messages handled | Cumulative |
+| `messages_by_hour` | Hourly message counts | 24 hours |
+| `avg_response_time_ms` | Pipeline latency | Rolling 100 |
+| `errors_by_type` | Error counts by category | 24 hours |
+| `service_call_latency` | Per-service response times | Rolling 50 |
+| `active_users` | Unique users by day | 7 days |
+
+### Error Aggregation
+
+Errors are aggregated by type and recency:
+
+```json
+{
+  "recent_errors": [
+    {
+      "timestamp": "2026-01-16T10:15:00+10:00",
+      "type": "groq_api_timeout",
+      "message": "Request timed out after 30s",
+      "count_last_hour": 3,
+      "first_occurrence": "2026-01-16T09:45:00+10:00"
+    },
+    {
+      "timestamp": "2026-01-16T08:30:00+10:00",
+      "type": "sheets_rate_limit",
+      "message": "Rate limit exceeded, retrying",
+      "count_last_hour": 1,
+      "first_occurrence": "2026-01-16T08:30:00+10:00"
+    }
+  ]
+}
+```
+
+This structure answers "what's broken?" and "how broken is it?" in a single read.
+
+### Pipeline Performance Tracking
+
+Each pipeline execution records timing:
+
+```
+Stage 1 (Router):     180ms
+Stage 2 (Context):    250ms (parallel)
+Stage 3 (Planner):    650ms
+Stage 4 (Response):   320ms
+Total:               1200ms
+```
+
+Aggregated stats help identify bottlenecks:
+- If Stage 3 consistently exceeds 1000ms: Groq API latency issue
+- If Stage 2 consistently exceeds 500ms: Google Sheets connection issue
+- If total consistently exceeds 3000ms: investigate all stages
+
+---
+
+## Logging Architecture
+
+### Structured Log Format
+
+Logs use JSON format for machine parsing:
+
+```json
+{
+  "timestamp": "2026-01-16T10:30:15.123+10:00",
+  "level": "INFO",
+  "component": "pipeline",
+  "event": "message_processed",
+  "user_id": 123456789,
+  "message_id": "abc123",
+  "route_type": "action",
+  "domains": ["task"],
+  "latency_ms": 1150,
+  "success": true
+}
+```
+
+**Querying logs:**
+```bash
+# Find all errors in last hour
+journalctl -u brain-agent --since "1 hour ago" -o json | \
+  jq -r 'select(.PRIORITY == "3") | .MESSAGE' | \
+  grep -o '{.*}' | jq .
+
+# Count messages by route type
+journalctl -u brain-agent --since today -o cat | \
+  grep "message_processed" | \
+  jq -r '.route_type' | sort | uniq -c
+
+# Find slow requests (>3s)
+journalctl -u brain-agent --since today -o cat | \
+  grep "message_processed" | \
+  jq -r 'select(.latency_ms > 3000) | "\(.timestamp) \(.latency_ms)ms \(.domains)"'
+```
+
+### Log Levels
+
+| Level | Use Case | Example |
+|-------|----------|---------|
+| ERROR | Action required | API authentication failed |
+| WARN | Degraded but functional | Retry succeeded after timeout |
+| INFO | Normal operations | Message processed successfully |
+| DEBUG | Troubleshooting | Full pipeline trace |
+
+### Component Tags
+
+Each log entry includes a component tag:
+
+| Component | Description |
+|-----------|-------------|
+| `telegram` | Polling and message handling |
+| `pipeline` | 4-stage message processing |
+| `router` | Stage 1 intent classification |
+| `context` | Stage 2 context fetching |
+| `planner` | Stage 3 action planning |
+| `responder` | Stage 4 response generation |
+| `proactive` | Scheduled tasks and check-ins |
+| `sheets` | Google Sheets operations |
+| `calendar` | Google Calendar operations |
+| `email` | Gmail operations |
+| `ai` | Groq LLM calls |
+
+### Deployment Verification
+
+After deployment, the bot writes a verification entry:
+
+```json
+{
+  "timestamp": "2026-01-16T10:00:00+10:00",
+  "level": "INFO",
+  "component": "startup",
+  "event": "deployment_complete",
+  "version": "1.0.0",
+  "git_commit": "abc1234",
+  "startup_time_ms": 4500,
+  "services_validated": [
+    "telegram",
+    "google_sheets",
+    "groq_api",
+    "calendar",
+    "email"
+  ],
+  "ready": true
+}
+```
+
+**Post-deploy verification:**
+```bash
+# Check deployment succeeded
+ssh -i ~/.ssh/sadhuastro_key root@170.64.142.252 \
+  "journalctl -u brain-agent -n 50 | grep deployment_complete"
+```
+
+---
+
+## Diagnostic Commands
+
+Quick reference for common diagnostic tasks:
+
+### Is the bot running?
+
+```bash
+# Option 1: Health file (fastest)
+cat /tmp/brain_agent_health.json | jq -r '.status'
+
+# Option 2: Systemd status
+systemctl is-active brain-agent
+
+# Option 3: Process check
+pgrep -f simple_bot.py
+```
+
+### What went wrong?
+
+```bash
+# Recent errors from health file
+cat /tmp/brain_agent_health.json | jq '.recent_errors'
+
+# Last 20 error logs
+journalctl -u brain-agent -p err -n 20
+
+# Full error context
+journalctl -u brain-agent --since "10 minutes ago" | grep -i error
+```
+
+### Performance issues?
+
+```bash
+# Pipeline latency stats
+cat /tmp/brain_agent_health.json | jq '.pipeline_stats'
+
+# Recent slow requests
+journalctl -u brain-agent --since "1 hour ago" -o cat | \
+  grep "message_processed" | \
+  jq -r 'select(.latency_ms > 2000)'
+```
+
+### Service connectivity?
+
+```bash
+# All services at once
+cat /tmp/brain_agent_health.json | jq '.service_health'
+```
+
+### Memory and resources?
+
+```bash
+# Process memory usage
+ps aux | grep simple_bot.py | awk '{print $4 "% memory, " $3 "% CPU"}'
+
+# System resources
+free -h && echo "---" && df -h /
+```

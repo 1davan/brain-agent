@@ -16,6 +16,9 @@ import pytz
 
 load_dotenv()
 
+# Health monitoring - import early for startup tracking
+from app.services.health_monitor import get_health_monitor
+
 # Brisbane timezone
 BRISBANE_TZ = pytz.timezone('Australia/Brisbane')
 
@@ -66,9 +69,12 @@ class SimpleTelegramBot:
         self.initialize_components()
 
     def initialize_components(self):
-        """Initialize bot components synchronously"""
+        """Initialize bot components synchronously with health monitoring"""
+        startup_start = time.time()
+        self.health_monitor = get_health_monitor()
+
         print("=" * 60)
-        print("BRAIN AGENT BOT - Starting up...")
+        print("[STARTUP] Brain Agent starting...")
         print("=" * 60)
 
         try:
@@ -82,48 +88,77 @@ class SimpleTelegramBot:
 
             self.config = Settings()
 
-            print("[1/5] Connecting to Google Sheets...")
-            self.sheets_client = SheetsClient(
-                credentials_path=self.config.google_sheets_credentials,
-                spreadsheet_id=self.config.spreadsheet_id
+            # Validate Telegram API first
+            telegram_ok = self._validate_telegram_api()
+            self.health_monitor.validate_service(
+                "telegram_polling", telegram_ok,
+                details=f"bot token configured" if telegram_ok else "invalid token",
+                critical=True
             )
-            print("      SUCCESS: Google Sheets connected")
+            if not telegram_ok:
+                raise Exception("Telegram API validation failed")
+
+            # Google Sheets
+            try:
+                self.sheets_client = SheetsClient(
+                    credentials_path=self.config.google_sheets_credentials,
+                    spreadsheet_id=self.config.spreadsheet_id
+                )
+                self.health_monitor.validate_service(
+                    "google_sheets", True,
+                    details=f"spreadsheet connected",
+                    critical=True
+                )
+            except Exception as e:
+                self.health_monitor.validate_service(
+                    "google_sheets", False,
+                    details=str(e),
+                    critical=True
+                )
+                raise
 
             # Load model settings from Config sheet (with defaults)
             groq_model = self.sheets_client.get_config_sync("groq_model") or "llama-3.3-70b-versatile"
             embedding_model = self.sheets_client.get_config_sync("embedding_model") or "all-MiniLM-L6-v2"
 
-            print(f"[2/5] Initializing AI Service ({groq_model})...")
-            # Load email writing styles from config if available
-            email_style_professional = self.sheets_client.get_config_sync("email_writing_style_professional")
-            email_style_casual = self.sheets_client.get_config_sync("email_writing_style_casual")
-            if email_style_professional:
-                print("      Using custom professional email style from Config sheet")
-            if email_style_casual:
-                print("      Using custom casual email style from Config sheet")
-            self.ai_service = AIService(
-                groq_api_key=self.config.groq_api_key,
-                model=groq_model,
-                email_style_professional=email_style_professional,
-                email_style_casual=email_style_casual
-            )
-            print("      SUCCESS: AI service initialized")
+            # Groq API
+            try:
+                email_style_professional = self.sheets_client.get_config_sync("email_writing_style_professional")
+                email_style_casual = self.sheets_client.get_config_sync("email_writing_style_casual")
+                self.ai_service = AIService(
+                    groq_api_key=self.config.groq_api_key,
+                    model=groq_model,
+                    email_style_professional=email_style_professional,
+                    email_style_casual=email_style_casual
+                )
+                self.health_monitor.validate_service(
+                    "groq_api", True,
+                    details=f"model: {groq_model}",
+                    critical=True
+                )
+            except Exception as e:
+                self.health_monitor.validate_service(
+                    "groq_api", False,
+                    details=str(e),
+                    critical=True
+                )
+                raise
 
-            print("[3/5] Initializing Vector Processor...")
+            # Vector Processor (embedding model)
+            print("[STARTUP] Loading embedding model...")
             self.vector_processor = VectorProcessor(model_name=embedding_model)
-            print("      SUCCESS: Vector processor ready")
+            print(f"[STARTUP] Checking embedding model... OK ({embedding_model})")
 
-            print("[4/5] Initializing Memory Agent...")
+            # Memory Agent
             self.memory_agent = MemoryAgent(
                 self.sheets_client,
                 self.vector_processor,
                 self.ai_service
             )
-            print("      SUCCESS: Memory agent ready")
 
-            print("[5/5] Initializing Task and Conversation Agents...")
+            # Task Agent
             self.task_agent = TaskAgent(self.sheets_client, None, self.ai_service)
-            
+
             # Initialize Calendar Service (optional - may fail if not configured)
             self.calendar_service = None
             try:
@@ -132,10 +167,17 @@ class SimpleTelegramBot:
                     credentials_path=self.config.google_sheets_credentials,
                     calendar_id=self.config.google_calendar_id
                 )
-                print("      SUCCESS: Calendar service initialized")
+                self.health_monitor.validate_service(
+                    "calendar_service", True,
+                    details=f"calendar: {self.config.google_calendar_id}",
+                    critical=False
+                )
             except Exception as e:
-                print(f"      WARNING: Calendar service not available: {e}")
-                print("      (To enable: Enable Calendar API and share calendar with service account)")
+                self.health_monitor.validate_service(
+                    "calendar_service", False,
+                    details=str(e),
+                    critical=False
+                )
 
             # Initialize Email Service (optional)
             self.email_service = None
@@ -143,11 +185,24 @@ class SimpleTelegramBot:
                 from app.services.email_service import EmailService
                 self.email_service = EmailService(sheets_client=self.sheets_client)
                 if self.email_service.gmail_address:
-                    print("      SUCCESS: Email service initialized")
+                    self.health_monitor.validate_service(
+                        "email_service", True,
+                        details=f"account: {self.email_service.gmail_address}",
+                        critical=False
+                    )
                 else:
                     self.email_service = None
+                    self.health_monitor.validate_service(
+                        "email_service", False,
+                        details="no gmail address configured",
+                        critical=False
+                    )
             except Exception as e:
-                print(f"      WARNING: Email service not available: {e}")
+                self.health_monitor.validate_service(
+                    "email_service", False,
+                    details=str(e),
+                    critical=False
+                )
 
             # Initialize Google Keep Service (optional)
             self.keep_service = None
@@ -155,12 +210,12 @@ class SimpleTelegramBot:
                 from app.services.keep_service import KeepService
                 self.keep_service = KeepService()
                 if self.keep_service.authenticated:
-                    print("      SUCCESS: Keep service initialized")
+                    print("[STARTUP] Checking Keep service... OK")
                 else:
                     self.keep_service = None
-                    print("      WARNING: Keep service not authenticated (add GOOGLE_KEEP_TOKEN to .env)")
+                    print("[STARTUP] Checking Keep service... SKIPPED (not configured)")
             except Exception as e:
-                print(f"      WARNING: Keep service not available: {e}")
+                print(f"[STARTUP] Checking Keep service... SKIPPED ({e})")
 
             self.conversation_agent = ConversationAgent(
                 self.ai_service,
@@ -172,35 +227,42 @@ class SimpleTelegramBot:
                 self.keep_service,      # Enable Google Keep notes
                 self.sheets_client      # Enable pipeline context fetching
             )
-            # Check if pipeline is enabled
-            if self.conversation_agent.use_pipeline:
-                print("      SUCCESS: All agents initialized (MULTI-STAGE PIPELINE ENABLED)")
-            else:
-                print("      SUCCESS: All agents initialized (legacy mode)")
 
             # Initialize default config if needed
-            print("[+] Checking Config sheet...")
             self.sheets_client.initialize_default_config()
 
             # Load known users from persistent storage
-            print("[+] Loading known users from database...")
             self._load_known_users()
-            print(f"      Loaded {len(self.known_users)} known user(s)")
 
             # Load user settings from persistent storage
-            print("[+] Loading user settings from database...")
             self._load_user_settings()
-            print(f"      Loaded settings for {len(self.user_checkin_hours)} user(s)")
 
-            print("=" * 60)
-            print("BOT READY - All systems operational")
-            print("=" * 60)
+            # Calculate startup time and mark complete
+            startup_time_ms = int((time.time() - startup_start) * 1000)
+            self.health_monitor.mark_startup_complete(startup_time_ms)
+
+            # Write initial health file
+            self.health_monitor.write_health_file()
 
         except Exception as e:
-            print(f"FATAL ERROR: Failed to initialize components: {e}")
+            self.health_monitor.startup_failed(str(e))
             import traceback
             traceback.print_exc()
             raise
+
+    def _validate_telegram_api(self) -> bool:
+        """Validate Telegram API token by calling getMe"""
+        try:
+            response = requests.get(f"{self.api_url}/getMe", timeout=10)
+            data = response.json()
+            if data.get('ok'):
+                bot_info = data.get('result', {})
+                print(f"[STARTUP] Checking Telegram API... OK (bot: @{bot_info.get('username', 'unknown')})")
+                return True
+            return False
+        except Exception as e:
+            print(f"[STARTUP] Checking Telegram API... FAILED ({e})")
+            return False
 
     def get_updates(self):
         """Get updates from Telegram API"""
@@ -466,13 +528,16 @@ class SimpleTelegramBot:
                 self.processed_messages.discard(msg_id)
 
     def process_message(self, message):
-        """Process a single message with proper deduplication"""
+        """Process a single message with proper deduplication and metrics tracking"""
         # Check if we should process this message
         if not self.should_process_message(message):
             return
 
         # Mark as processed IMMEDIATELY to prevent race conditions
         self.mark_message_processed(message)
+
+        # Start timing for metrics
+        process_start = time.time()
 
         try:
             user_id = str(message['from']['id'])
@@ -556,10 +621,28 @@ class SimpleTelegramBot:
             self._store_conversation(user_id, "user", text)
             self._store_conversation(user_id, "assistant", response)
 
+            # Record successful message processing
+            latency_ms = int((time.time() - process_start) * 1000)
+            route_type = "action" if isinstance(result, dict) else "chat"
+            self.health_monitor.record_message_processed(
+                user_id=int(user_id),
+                latency_ms=latency_ms,
+                route_type=route_type
+            )
+            self.health_monitor.record_pipeline_timing(latency_ms)
+
         except Exception as e:
             print(f"ERROR processing message: {e}")
             import traceback
             traceback.print_exc()
+
+            # Record error
+            self.health_monitor.record_error(
+                error_type="message_processing_error",
+                message=str(e),
+                component="pipeline"
+            )
+
             try:
                 self.send_message(message['chat']['id'], "Sorry, I encountered an error. Please try again.")
             except:
@@ -1595,10 +1678,15 @@ CONFIGURE:
                 break
             except Exception as e:
                 print(f"Error in main loop: {e}")
+                self.health_monitor.record_error(
+                    error_type="main_loop_error",
+                    message=str(e),
+                    component="telegram"
+                )
                 time.sleep(5)
 
     def _proactive_loop(self):
-        """Background loop for proactive features"""
+        """Background loop for proactive features and health monitoring"""
         print(f"[PROACTIVE] Loop started at {datetime.now(BRISBANE_TZ).strftime('%H:%M:%S')}")
         print(f"[PROACTIVE] Check-in hours: {self.default_checkin_hours}")
         print(f"[PROACTIVE] Daily summary hour: {self.daily_summary_hour}")
@@ -1611,6 +1699,9 @@ CONFIGURE:
                 now = datetime.now(BRISBANE_TZ)
                 current_hour = now.hour
                 current_date = now.date()
+
+                # Record proactive loop execution for health monitoring
+                self.health_monitor.record_proactive_run()
 
                 # Daily summary (once per day at configured hour)
                 if current_hour == self.daily_summary_hour and last_summary_date != current_date:
@@ -1638,10 +1729,19 @@ CONFIGURE:
                 # Clean up expired task discussion sessions
                 self._cleanup_expired_sessions()
 
+                # Write health status file every cycle (60 seconds)
+                self.health_monitor.write_health_file()
+
             except Exception as e:
                 print(f"[PROACTIVE] Loop error: {e}")
                 import traceback
                 traceback.print_exc()
+                # Record proactive loop errors
+                self.health_monitor.record_error(
+                    error_type="proactive_loop_error",
+                    message=str(e),
+                    component="proactive"
+                )
 
             # Sleep at the END of the loop - check every minute for more responsive check-ins
             time.sleep(60)
@@ -1775,6 +1875,7 @@ CONFIGURE:
                     self.send_message(chat_id, message)
 
                 self.last_daily_summary[user_id] = today
+                self.health_monitor.record_summary_sent()
                 print(f"Sent daily summary to {user_id}")
 
             except Exception as e:
@@ -1907,6 +2008,7 @@ CONFIGURE:
                     'started_at': now
                 }
 
+                self.health_monitor.record_checkin_sent()
                 print(f"Sent task check-in to {user_id} for: {title}")
 
             except Exception as e:
