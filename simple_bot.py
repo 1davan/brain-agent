@@ -2759,23 +2759,52 @@ CONFIGURE:
             self.edit_message(chat_id, message_id, f"Error: {e}")
 
     def _process_recurring_tasks(self):
-        """Check for completed recurring tasks and create next occurrence"""
+        """Check for recurring tasks and handle them:
+        1. Completed recurring tasks: create next occurrence
+        2. Pending recurring tasks with past deadline: roll forward the deadline
+        """
         from dateutil import parser as date_parser
         from dateutil.relativedelta import relativedelta
-        
+
         now = datetime.now(BRISBANE_TZ)
-        
+
         for user_id, chat_id in self.known_users:
             try:
                 tasks = self._get_user_tasks_sync(user_id)
                 if not tasks:
                     continue
-                
+
                 for task in tasks:
-                    # Only process completed recurring tasks
-                    if task.get('status') != 'complete':
-                        continue
+                    # Skip non-recurring tasks
                     if str(task.get('is_recurring', 'false')).lower() != 'true':
+                        continue
+
+                    # Handle PENDING recurring tasks with past deadlines (auto-rollforward)
+                    if task.get('status') == 'pending':
+                        deadline_str = task.get('deadline', '')
+                        if deadline_str:
+                            try:
+                                deadline = date_parser.parse(deadline_str)
+                                if deadline.tzinfo is None:
+                                    deadline = BRISBANE_TZ.localize(deadline)
+
+                                # If deadline is in the past, roll forward to next occurrence
+                                if deadline < now:
+                                    recurrence_pattern = task.get('recurrence_pattern', '')
+                                    if recurrence_pattern:
+                                        next_deadline = self._calculate_next_occurrence(recurrence_pattern, now)
+                                        if next_deadline:
+                                            task_id = task.get('task_id', '')
+                                            task_title = task.get('title', '')
+                                            # Update the deadline in sheets
+                                            self._update_task_deadline_sync(user_id, task_id, next_deadline)
+                                            print(f"[RECURRING] Rolled forward '{task_title}' to {next_deadline.strftime('%a %b %d')}")
+                            except Exception as e:
+                                print(f"Error checking recurring deadline: {e}")
+                        continue  # Don't process pending tasks further
+
+                    # Handle COMPLETED recurring tasks (create next occurrence)
+                    if task.get('status') != 'complete':
                         continue
                     
                     recurrence_pattern = task.get('recurrence_pattern', '')
@@ -3047,6 +3076,31 @@ CONFIGURE:
         except Exception as e:
             print(f"Error updating task progress: {e}")
             return f"Error: {e}"
+        finally:
+            loop.close()
+
+    def _update_task_deadline_sync(self, user_id: str, task_id: str, new_deadline: datetime):
+        """Update task deadline synchronously (used for recurring task rollforward)"""
+        import asyncio
+        import nest_asyncio
+        nest_asyncio.apply()
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            async def update():
+                row_index = await self.sheets_client.find_row_by_id("Tasks", user_id, task_id)
+                if row_index:
+                    await self.sheets_client.update_row("Tasks", row_index, {
+                        "deadline": new_deadline.isoformat(),
+                        "updated_at": datetime.now(BRISBANE_TZ).isoformat()
+                    })
+                    return True
+                return False
+            return loop.run_until_complete(update())
+        except Exception as e:
+            print(f"Error updating task deadline: {e}")
+            return False
         finally:
             loop.close()
 
