@@ -1708,6 +1708,7 @@ CONFIGURE:
                     print(f"[PROACTIVE] Triggering daily summaries at {now.strftime('%H:%M')}")
                     self._send_daily_summaries()
                     last_summary_date = current_date
+                    time.sleep(5)  # Rate limit: pause after summaries before check-ins
 
                 # Proactive task check-ins (once per configured hour)
                 # Only trigger if current hour is in check-in hours and we haven't sent this hour yet
@@ -1715,9 +1716,11 @@ CONFIGURE:
                     print(f"[PROACTIVE] Triggering task check-ins at {now.strftime('%H:%M')} (hour {current_hour})")
                     self._send_task_checkins()
                     last_checkin_hour = current_hour
+                    time.sleep(3)  # Rate limit: pause after check-ins
 
-                # Check for upcoming deadlines (every cycle)
+                # Check for upcoming deadlines (every cycle, but with rate limiting)
                 self._check_upcoming_deadlines()
+                time.sleep(2)  # Rate limit: pause between operations
 
                 # Handle recurring tasks - create next occurrence when completed
                 self._process_recurring_tasks()
@@ -1910,6 +1913,9 @@ CONFIGURE:
                 self.health_monitor.record_summary_sent()
                 print(f"Sent daily summary to {user_id}")
 
+                # Rate limit: pause between users to avoid Google Sheets 429 errors
+                time.sleep(3)
+
             except Exception as e:
                 print(f"Error sending daily summary to {user_id}: {e}")
 
@@ -2043,6 +2049,9 @@ CONFIGURE:
                 self.health_monitor.record_checkin_sent()
                 print(f"Sent task check-in to {user_id} for: {title}")
 
+                # Rate limit: pause between users to avoid Google Sheets 429 errors
+                time.sleep(3)
+
             except Exception as e:
                 print(f"Error sending task check-in to {user_id}: {e}")
 
@@ -2053,6 +2062,8 @@ CONFIGURE:
                 archived_count = self._archive_old_tasks_sync(user_id)
                 if archived_count > 0:
                     print(f"Auto-archived {archived_count} task(s) for user {user_id}")
+                # Rate limit: pause between users
+                time.sleep(2)
             except Exception as e:
                 print(f"Error auto-archiving tasks for {user_id}: {e}")
 
@@ -2106,6 +2117,9 @@ CONFIGURE:
                                 print(f"Sent reminder to {user_id} for task: {task.get('title')}")
                     except:
                         pass
+
+                # Rate limit: pause between users
+                time.sleep(2)
 
             except Exception as e:
                 print(f"Error checking deadlines for {user_id}: {e}")
