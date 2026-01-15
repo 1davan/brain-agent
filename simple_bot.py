@@ -1800,16 +1800,48 @@ CONFIGURE:
                 day_name = now.strftime('%A, %B %d')
                 message = f"GOOD MORNING - {day_name}\n\n"
 
-                # Today's Focus section (pick 1-3 most important)
+                # Today's Focus section (pick 1-3 most important ACTIONABLE tasks)
+                # Filter out reminder-style tasks that aren't real work items
+                def is_actionable_task(task):
+                    """Filter out reminder/event-style tasks, keep real work items"""
+                    title = task.get('title', '').lower()
+                    # Skip if it looks like a reminder or event notification
+                    reminder_keywords = ['reminder', 'lesson', 'swimming', 'appointment',
+                                        'birthday', 'anniversary', 'payment due']
+                    for kw in reminder_keywords:
+                        if kw in title:
+                            return False
+                    # Skip if no description (usually auto-created reminders)
+                    # but keep if it has progress > 0 (user has worked on it)
+                    desc = task.get('description', '')
+                    progress = task.get('progress', 0)
+                    if not desc and progress == 0 and len(title) < 30:
+                        return False
+                    return True
+
+                # Filter each list to actionable tasks
+                actionable_overdue = [t for t in overdue if is_actionable_task(t)]
+                actionable_due_today = [t for t in due_today if is_actionable_task(t)]
+                actionable_high_priority = [t for t in high_priority if is_actionable_task(t)]
+
                 focus_tasks = []
-                for t in overdue[:2]:
-                    focus_tasks.append((t, 'overdue'))
-                for t in due_today[:2]:
-                    if len(focus_tasks) < 3:
+                # Prioritize: high priority overdue > high priority due today > other overdue > other due today
+                for t in actionable_overdue:
+                    if t.get('priority') in ('high', 'critical') and len(focus_tasks) < 3:
+                        focus_tasks.append((t, 'overdue'))
+                for t in actionable_due_today:
+                    if t.get('priority') in ('high', 'critical') and len(focus_tasks) < 3:
                         focus_tasks.append((t, 'today'))
-                for t in high_priority[:2]:
+                for t in actionable_high_priority:
                     if len(focus_tasks) < 3 and t not in [x[0] for x in focus_tasks]:
                         focus_tasks.append((t, 'priority'))
+                # Fill remaining with any actionable overdue/due today
+                for t in actionable_overdue:
+                    if len(focus_tasks) < 3 and t not in [x[0] for x in focus_tasks]:
+                        focus_tasks.append((t, 'overdue'))
+                for t in actionable_due_today:
+                    if len(focus_tasks) < 3 and t not in [x[0] for x in focus_tasks]:
+                        focus_tasks.append((t, 'today'))
 
                 if focus_tasks:
                     message += "TODAY'S FOCUS:\n"
@@ -2123,17 +2155,48 @@ CONFIGURE:
             day_name = now.strftime('%A, %B %d')
             message = f"DAILY SUMMARY - {day_name}\n\n"
 
-            # Today's Focus section (pick 1-3 most important)
+            # Today's Focus section (pick 1-3 most important ACTIONABLE tasks)
+            # Filter out reminder-style tasks that aren't real work items
+            def is_actionable_task(task):
+                """Filter out reminder/event-style tasks, keep real work items"""
+                title = task.get('title', '').lower()
+                # Skip if it looks like a reminder or event notification
+                reminder_keywords = ['reminder', 'lesson', 'swimming', 'appointment',
+                                    'birthday', 'anniversary', 'payment due']
+                for kw in reminder_keywords:
+                    if kw in title:
+                        return False
+                # Skip if no description (usually auto-created reminders)
+                # but keep if it has progress > 0 (user has worked on it)
+                desc = task.get('description', '')
+                progress = task.get('progress', 0)
+                if not desc and progress == 0 and len(title) < 30:
+                    return False
+                return True
+
+            # Filter each list to actionable tasks
+            actionable_overdue = [t for t in overdue if is_actionable_task(t)]
+            actionable_due_today = [t for t in due_today if is_actionable_task(t)]
+            actionable_high_priority = [t for t in high_priority if is_actionable_task(t)]
+
             focus_tasks = []
-            # Priority: overdue first, then due today, then high priority
-            for t in overdue[:2]:
-                focus_tasks.append((t, 'overdue'))
-            for t in due_today[:2]:
-                if len(focus_tasks) < 3:
+            # Prioritize: high priority overdue > high priority due today > other overdue > other due today
+            for t in actionable_overdue:
+                if t.get('priority') in ('high', 'critical') and len(focus_tasks) < 3:
+                    focus_tasks.append((t, 'overdue'))
+            for t in actionable_due_today:
+                if t.get('priority') in ('high', 'critical') and len(focus_tasks) < 3:
                     focus_tasks.append((t, 'today'))
-            for t in high_priority[:2]:
+            for t in actionable_high_priority:
                 if len(focus_tasks) < 3 and t not in [x[0] for x in focus_tasks]:
                     focus_tasks.append((t, 'priority'))
+            # Fill remaining with any actionable overdue/due today
+            for t in actionable_overdue:
+                if len(focus_tasks) < 3 and t not in [x[0] for x in focus_tasks]:
+                    focus_tasks.append((t, 'overdue'))
+            for t in actionable_due_today:
+                if len(focus_tasks) < 3 and t not in [x[0] for x in focus_tasks]:
+                    focus_tasks.append((t, 'today'))
 
             if focus_tasks:
                 message += "TODAY'S FOCUS:\n"
