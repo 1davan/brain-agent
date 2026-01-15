@@ -1071,8 +1071,25 @@ def api_commands_checkin():
         if "archived" in df.columns:
             pending = pending[pending["archived"].astype(str).str.lower() != "true"]
 
+        # Filter out tasks that are skipped (skipped_until in the future)
+        if "skipped_until" in df.columns:
+            from datetime import datetime
+            now = datetime.now()
+            def is_not_skipped(row):
+                skip_str = row.get("skipped_until", "")
+                if not skip_str or str(skip_str).strip() == "":
+                    return True
+                try:
+                    skip_until = datetime.fromisoformat(str(skip_str).replace("Z", "+00:00"))
+                    if skip_until.tzinfo:
+                        skip_until = skip_until.replace(tzinfo=None)
+                    return now > skip_until
+                except:
+                    return True
+            pending = pending[pending.apply(is_not_skipped, axis=1)]
+
         if pending.empty:
-            return jsonify({"success": False, "error": "No pending tasks for check-in"})
+            return jsonify({"success": False, "error": "No pending tasks for check-in (all may be skipped)"})
 
         # Get first pending task
         task = pending.iloc[0]

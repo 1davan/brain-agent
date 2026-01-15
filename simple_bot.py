@@ -1977,77 +1977,122 @@ CONFIGURE:
                         print(f"[CHECK-IN] User {user_id}: Skipping - already sent check-in this hour")
                         continue
 
-                # Get a task to check in about
+                # Get 1-3 tasks to check in about (randomized for variety)
                 print(f"[CHECK-IN] User {user_id}: Looking for tasks to check in about...")
+                import random
+                num_tasks = random.choice([1, 2, 2, 3])  # Weighted: 25% 1 task, 50% 2 tasks, 25% 3 tasks
                 tasks = self._get_tasks_for_checkin_sync(user_id)
                 if not tasks:
                     print(f"[CHECK-IN] User {user_id}: No pending tasks found for check-in")
                     continue
 
-                task = tasks[0]
-                title = task.get('title', 'your task')
-                progress = int(task.get('progress_percent', '0') or '0')
-                deadline = task.get('deadline', '')
+                # Take up to num_tasks
+                checkin_tasks = tasks[:min(num_tasks, len(tasks))]
 
-                # Build a conversational check-in message
-                greetings = [
-                    f"Hey! Just checking in on '{title}'.",
-                    f"Quick check-in: How's '{title}' going?",
-                    f"Thinking about you! How's progress on '{title}'?",
-                ]
-                import random
-                message = random.choice(greetings)
+                # Build check-in message with multiple tasks
+                if len(checkin_tasks) == 1:
+                    task = checkin_tasks[0]
+                    title = task.get('title', 'your task')
+                    progress = int(task.get('progress_percent', '0') or '0')
+                    deadline = task.get('deadline', '')
 
-                if progress > 0:
-                    message += f" Last I heard you were at {progress}%."
-                else:
-                    message += " Have you had a chance to start on it?"
-
-                if deadline:
-                    try:
-                        deadline_dt = datetime.fromisoformat(deadline.replace('Z', '+00:00'))
-                        days_until = (deadline_dt.date() - today).days
-                        if days_until < 0:
-                            message += f" (This was due {abs(days_until)} day(s) ago!)"
-                        elif days_until == 0:
-                            message += " (Due today!)"
-                        elif days_until == 1:
-                            message += " (Due tomorrow)"
-                        elif days_until <= 3:
-                            message += f" (Due in {days_until} days)"
-                    except:
-                        pass
-
-                message += "\n\nReply with your progress or tap a button below:"
-
-                # Add inline buttons for quick responses
-                task_id = task.get('task_id', '')
-                reply_markup = {
-                    'inline_keyboard': [
-                        [
-                            {'text': 'Done!', 'callback_data': f'task_done:{task_id}'},
-                            {'text': '50%', 'callback_data': f'task_progress:{task_id}:50'},
-                            {'text': '25%', 'callback_data': f'task_progress:{task_id}:25'}
-                        ],
-                        [
-                            {'text': 'Blocked', 'callback_data': f'task_blocked:{task_id}'},
-                            {'text': 'Skip', 'callback_data': f'task_skip:{task_id}'}
-                        ]
+                    greetings = [
+                        f"Hey! Quick check-in on '{title}'.",
+                        f"How's '{title}' going?",
+                        f"Checking in: '{title}'",
                     ]
-                }
+                    message = random.choice(greetings)
+
+                    if progress > 0:
+                        message += f" (Currently at {progress}%)"
+
+                    if deadline:
+                        try:
+                            deadline_dt = datetime.fromisoformat(deadline.replace('Z', '+00:00'))
+                            days_until = (deadline_dt.date() - today).days
+                            if days_until < 0:
+                                message += f" - OVERDUE by {abs(days_until)} day(s)!"
+                            elif days_until == 0:
+                                message += " - Due TODAY!"
+                            elif days_until == 1:
+                                message += " - Due tomorrow"
+                        except:
+                            pass
+
+                    # Single task buttons
+                    task_id = task.get('task_id', '')
+                    reply_markup = {
+                        'inline_keyboard': [
+                            [
+                                {'text': 'Done!', 'callback_data': f'task_done:{task_id}'},
+                                {'text': '50%', 'callback_data': f'task_progress:{task_id}:50'},
+                                {'text': '25%', 'callback_data': f'task_progress:{task_id}:25'}
+                            ],
+                            [
+                                {'text': 'Blocked', 'callback_data': f'task_blocked:{task_id}'},
+                                {'text': 'Skip', 'callback_data': f'task_skip:{task_id}'}
+                            ]
+                        ]
+                    }
+                else:
+                    # Multiple tasks - show list with selection buttons
+                    greetings = [
+                        "Time for a quick check-in! Here are some tasks on your plate:",
+                        "Hey! Let's touch base on a few items:",
+                        "Quick status check - how are these going?",
+                    ]
+                    message = random.choice(greetings) + "\n"
+
+                    buttons = []
+                    for i, task in enumerate(checkin_tasks, 1):
+                        title = task.get('title', 'Task')[:40]  # Truncate long titles
+                        progress = int(task.get('progress_percent', '0') or '0')
+                        deadline = task.get('deadline', '')
+                        task_id = task.get('task_id', '')
+
+                        # Build task line
+                        status_emoji = ""
+                        if deadline:
+                            try:
+                                deadline_dt = datetime.fromisoformat(deadline.replace('Z', '+00:00'))
+                                days_until = (deadline_dt.date() - today).days
+                                if days_until < 0:
+                                    status_emoji = " [OVERDUE]"
+                                elif days_until == 0:
+                                    status_emoji = " [TODAY]"
+                                elif days_until == 1:
+                                    status_emoji = " [Tomorrow]"
+                            except:
+                                pass
+
+                        progress_str = f" ({progress}%)" if progress > 0 else ""
+                        message += f"\n{i}. {title}{progress_str}{status_emoji}"
+
+                        # Add row of buttons for this task
+                        buttons.append([
+                            {'text': f'{i}. Done', 'callback_data': f'task_done:{task_id}'},
+                            {'text': f'{i}. 50%', 'callback_data': f'task_progress:{task_id}:50'},
+                            {'text': f'{i}. Skip', 'callback_data': f'task_skip:{task_id}'}
+                        ])
+
+                    message += "\n\nTap a button to update, or reply with task number + status (e.g., '1 done', '2 75%'):"
+
+                    reply_markup = {'inline_keyboard': buttons}
 
                 self.send_message(chat_id, message, reply_markup=reply_markup)
                 self.last_task_checkin[user_id] = (today, current_hour)
 
-                # Start a task discussion session
+                # Store first task for text-based follow-up (backwards compatible)
                 self.task_discussion_sessions[user_id] = {
-                    'task_id': task.get('task_id'),
-                    'task_title': title,
-                    'started_at': now
+                    'task_id': checkin_tasks[0].get('task_id'),
+                    'task_title': checkin_tasks[0].get('title', 'Task'),
+                    'started_at': now,
+                    'checkin_tasks': checkin_tasks  # Store all tasks for multi-task parsing
                 }
 
                 self.health_monitor.record_checkin_sent()
-                print(f"Sent task check-in to {user_id} for: {title}")
+                task_titles = [t.get('title', '')[:30] for t in checkin_tasks]
+                print(f"Sent task check-in to {user_id} for: {task_titles}")
 
                 # Rate limit: pause between users to avoid Google Sheets 429 errors
                 time.sleep(3)
@@ -2739,12 +2784,26 @@ CONFIGURE:
                     
                     if not recurrence_pattern:
                         continue
-                    
-                    # Check if we already created next occurrence
+
+                    # Check if we already created next occurrence (in-memory check)
                     processed_key = f"recurring_{task_id}"
                     if processed_key in self.processed_messages:
                         continue
-                    
+
+                    # IMPORTANT: Check if a pending task with same title already exists
+                    # This prevents duplicates when bot restarts (in-memory set is lost)
+                    task_title = task.get('title', '')
+                    existing_pending = [
+                        t for t in tasks
+                        if t.get('title') == task_title
+                        and t.get('status') == 'pending'
+                        and str(t.get('is_recurring', 'false')).lower() == 'true'
+                    ]
+                    if existing_pending:
+                        # Already have a pending instance, skip creating another
+                        self.processed_messages.add(processed_key)  # Remember for this session
+                        continue
+
                     # Check end date
                     if recurrence_end_str:
                         try:
@@ -3018,7 +3077,7 @@ CONFIGURE:
         asyncio.set_event_loop(loop)
         try:
             async def get_tasks():
-                return await self.task_agent.get_tasks_for_checkin(user_id, limit=1)
+                return await self.task_agent.get_tasks_for_checkin(user_id, limit=5)  # Get up to 5, we'll pick 1-3
             return loop.run_until_complete(get_tasks())
         except:
             return []
