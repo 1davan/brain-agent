@@ -258,7 +258,8 @@ class TaskAgent:
             # Filter: pending tasks only, not archived
             pending_mask = tasks_df['status'] == 'pending'
             if 'archived' in tasks_df.columns:
-                pending_mask &= tasks_df['archived'].astype(str) != 'true'
+                # Case-insensitive check for archived flag
+                pending_mask &= tasks_df['archived'].astype(str).str.lower() != 'true'
             tasks = tasks_df[pending_mask].to_dict('records')
 
             if not tasks:

@@ -1069,7 +1069,7 @@ def api_commands_checkin():
         df = run_async(client.get_sheet_data("Tasks", user_id))
         pending = df[df["status"] == "pending"]
         if "archived" in df.columns:
-            pending = pending[pending["archived"].astype(str) != "true"]
+            pending = pending[pending["archived"].astype(str).str.lower() != "true"]
 
         if pending.empty:
             return jsonify({"success": False, "error": "No pending tasks for check-in"})
@@ -1133,7 +1133,7 @@ def api_commands_daily_summary():
         df = run_async(client.get_sheet_data("Tasks", user_id))
         pending_df = df[df["status"] == "pending"]
         if "archived" in df.columns:
-            pending_df = pending_df[pending_df["archived"].astype(str) != "true"]
+            pending_df = pending_df[pending_df["archived"].astype(str).str.lower() != "true"]
 
         now = datetime.now()
         today = now.date()
@@ -1309,7 +1309,7 @@ def api_commands_check_deadlines():
         df = run_async(client.get_sheet_data("Tasks", user_id))
         pending = df[df["status"] == "pending"]
         if "archived" in df.columns:
-            pending = pending[pending["archived"].astype(str) != "true"]
+            pending = pending[pending["archived"].astype(str).str.lower() != "true"]
 
         now = datetime.now()
         today = now.date()
@@ -1447,7 +1447,7 @@ def api_commands_stats():
             df = run_async(client.get_sheet_data("Tasks", user_id))
             pending = df[df["status"] == "pending"]
             if "archived" in df.columns:
-                pending = pending[pending["archived"].astype(str) != "true"]
+                pending = pending[pending["archived"].astype(str).str.lower() != "true"]
             stats["pending_tasks"] = len(pending)
         except:
             pass
